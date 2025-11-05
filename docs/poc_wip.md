@@ -16,7 +16,8 @@ References
 - **Tooling, fixtures, and tests:** `tests/` cover repository flows, parser output, engine configuration, renderer output, and DocumentStore-based round trips (`tests/test_round_trip.py`). Postgres runs are supported when `POSTGRES_TEST_URL` or `DATABASE_URL` is set (see `tests/conftest.py`); otherwise tests default to SQLite. Sample data + script (`data/secondary_tree_example.json`, `scripts/load_secondary_tree_example.py`) provide a realistic scenario that can be seeded into SQLite for manual verification alongside notebooks (`notebooks/poc_walkthrough.ipynb`).
 - **Document Store seam:** `block_data_store/store/document_store.py` now exposes document fetch helpers plus secondary-tree support via `get_page_group`, resolving `synced` children into canonical blocks while preserving structural metadata.
 - **Document Store seam:** `block_data_store/store/document_store.py` now exposes `get_root_tree` (main document) plus slice support via `get_slice`, resolving `synced` children into reusable views while preserving structural metadata; ingestion and one-off block lookups are routed through the store.
-- **UI / renderer layers:** Markdown renderer is live and the NiceGUI demo now covers navigation, edits, and filtering (full block/parent/root forms plus quick actions) alongside previews; inline documentation and HTML renderer remain open.
+- **UI / renderer layers:** Markdown renderer is live and the NiceGUI showcase now walks through navigation, repository-grade filtering (block/parent/root), block inspection, and renderer previews with inline documentation; HTML renderer remains open.
+- **Sample content:** `data/poc_long_showcase.md` adds a synthetic, long-form handbook covering headings, nested lists, and multiple datasets to exercise performance and UI behaviour with larger documents.
 
 ## Scope Adjustments (POC focus)
 
@@ -36,7 +37,7 @@ References
 | Document Store orchestration | Full spec §7 (`docs/decipher_full_specification.md:125-140`) | 🟢 Validated | Façade handles canonical fetches plus page-group/synced resolution; mutations remain out of scope. |
 | Secondary trees & synced/page_group blocks | Full spec Appendix A.5 (`docs/decipher_full_specification.md:253-289`) + POC spec objective 2 | 🟢 Validated | Read-side modelling/resolution (page groups + synced refs) is implemented; authoring/mutation flows deferred. |
 | Renderer (Markdown) | Full spec §§5 & Appendix D (`docs/decipher_full_specification.md:72-113, 459-517`) + POC deliverables (`docs/decipher_poc_specification.md:69-80`) | 🟢 Ready | Markdown renderer shipped (synced-aware, metadata toggles); HTML renderer deferred. |
-| NiceGUI app | POC spec §3 Demonstrations (`docs/decipher_poc_specification.md:37-46`) | 🟡 Prototype | Demo loads/seeds, lists documents, shows tree, filters (full block/parent/root controls), renders Markdown, and edits metadata/properties; next: document UI actions and inline help. |
+| NiceGUI app | POC spec §3 Demonstrations (`docs/decipher_poc_specification.md:37-46`) | 🟡 Prototype | Fresh showcase app seeds documents, presents sidebar navigation + expansion-based walkthrough (overview, filters, inspector, renderer) with inline docs; next: polish copy and add short call-stack examples. |
 | Notebook + performance instrumentation | POC spec §§2–3 & Success Criteria (`docs/decipher_poc_specification.md:13-46, 84-92`) | 🟡 Needs follow-through | Capture timings/query counts and validate Postgres parity in notebook + pytest markers. |
 | Test suite & performance coverage | POC spec §3 Quality (`docs/decipher_poc_specification.md:48-55`) | 🟡 Partial | Add performance-focused tests/markers; broaden backend coverage via env-configured Postgres runs. |
 
@@ -66,7 +67,8 @@ References
 
 ## Work Log
 
-- 2025-11-05: Added repository-level `RootFilter` support with tests and expanded the NiceGUI filter panel to mirror block-level controls for parent/root contexts (plus quick actions and result summaries); refreshed the plan to focus on documentation and performance metrics.
+- 2025-11-05: Added repository-level `RootFilter` support with tests and rebuilt the NiceGUI demo as a guided POC showcase (sidebar tree + documentation-backed expansions for filters, inspector, preview); refreshed the plan to focus on documentation and performance metrics.
+- 2025-11-05: Authored `data/poc_long_showcase.md`, a synthetic multi-section handbook that stresses nested lists and datasets to validate parser throughput and UI responsiveness against larger documents.
 - 2025-10-25: Completed the typed block/content retrofit, extended DocumentStore for page-group & synced reads, added the secondary-tree sample + loader, delivered the Markdown renderer with unit tests, and added a DocumentStore-driven Markdown round-trip test.
 - 2025-10-23: Laid the groundwork with persistence/filtering upgrades (JSON filters, boolean logic, Postgres fixtures) and refreshed the plan to align with the spec.
 - 2025-10-29: Reviewed the revised storage-layer summary; flagged that callers still construct/use the repository directly (DocumentStore factories, renderer callbacks, `scripts/load_secondary_tree_example.py`), which conflicts with the “domain service as single entry point” guidance.
