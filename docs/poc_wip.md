@@ -18,6 +18,7 @@ References
 - **Document Store seam:** `block_data_store/store/document_store.py` now exposes `get_root_tree` (main document) plus slice support via `get_slice`, resolving `synced` children into reusable views while preserving structural metadata; ingestion and one-off block lookups are routed through the store.
 - **UI / renderer layers:** Markdown renderer is live and the NiceGUI showcase now walks through navigation, repository-grade filtering (block/parent/root), block inspection, and renderer previews with inline documentation; HTML renderer remains open.
 - **Sample content:** `data/poc_long_showcase.md` adds a synthetic, long-form handbook covering headings, nested lists, and multiple datasets to exercise performance and UI behaviour with larger documents.
+- **Performance tooling:** `scripts/perf_smoke.py` provides a CLI smoke test that repeatedly ingests/query/renders markdown samples against SQLite or Postgres and emits JSON telemetry.
 
 ## Scope Adjustments (POC focus)
 
