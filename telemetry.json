@@ -1,0 +1,61 @@
+{
+  "document": "/Users/ekalimullin/Desktop/PyProjects/block_data_store/data/poc_long_showcase.md",
+  "database": "sqlite://perf_smoke.db",
+  "checkpoints": [
+    {
+      "documents": 10,
+      "sample_size": 10,
+      "avg_fetch_ms": 123.2020469091367,
+      "avg_render_ms": 4.473075701389462,
+      "avg_render_length": 31233.0,
+      "avg_filter_paragraph_ms": 2681.8568854010664,
+      "avg_filter_parent_ms": 1775.460626592394,
+      "avg_paragraph_count": 15.0,
+      "avg_parent_count": 0.0,
+      "total_blocks": 4900
+    },
+    {
+      "documents": 100,
+      "sample_size": 10,
+      "avg_fetch_ms": 92.70830560708418,
+      "avg_render_ms": 3.9510439964942634,
+      "avg_render_length": 31233.0,
+      "avg_filter_paragraph_ms": 1263.9435998920817,
+      "avg_filter_parent_ms": 1230.8995232044253,
+      "avg_paragraph_count": 15.0,
+      "avg_parent_count": 0.0,
+      "total_blocks": 49000
+    },
+    {
+      "documents": 1000,
+      "sample_size": 10,
+      "avg_fetch_ms": 123.70748889516108,
+      "avg_render_ms": 4.3444155948236585,
+      "avg_render_length": 31233.0,
+      "avg_filter_paragraph_ms": 1615.4331211058889,
+      "avg_filter_parent_ms": 1446.1039121029899,
+      "avg_paragraph_count": 15.0,
+      "avg_parent_count": 0.0,
+      "total_blocks": 490000
+    },
+    {
+      "documents": 10000,
+      "sample_size": 10,
+      "avg_fetch_ms": 299.7431507857982,
+      "avg_render_ms": 4.16409419849515,
+      "avg_render_length": 31233.0,
+      "avg_filter_paragraph_ms": 13188.458000001265,
+      "avg_filter_parent_ms": 12332.992694101995,
+      "avg_paragraph_count": 15.0,
+      "avg_parent_count": 0.0,
+      "total_blocks": 4900000
+    }
+  ],
+  "steps": [
+    10,
+    100,
+    1000,
+    10000
+  ],
+  "sample_size": 10
+}
