@@ -13,6 +13,7 @@ from block_data_store.repositories.filters import (
     FilterExpression,
     ParentFilter,
     PropertyFilter,
+    RootFilter,
     WhereClause,
     apply_structural_filters,
     build_filter_expression,
@@ -65,11 +66,22 @@ class BlockRepository:
         where: WhereClause | None = None,
         property_filter: FilterExpression | None = None,
         parent: ParentFilter | None = None,
+        root: RootFilter | None = None,
         limit: int | None = None,
     ) -> list[Block]:
         """Return blocks matching structural and semantic filters."""
         with self._session_factory() as session:
             query = session.query(DbBlock)
+
+            if root is not None:
+                root_alias = aliased(DbBlock)
+                query = query.join(root_alias, DbBlock.root_id == root_alias.id)
+                if root.where is not None:
+                    query = apply_structural_filters(query, root_alias, root.where)
+                if root.property_filter is not None:
+                    query = query.filter(
+                        build_filter_expression(root_alias, root.property_filter)
+                    )
 
             if parent is not None:
                 parent_alias = aliased(DbBlock)

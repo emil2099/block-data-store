@@ -15,6 +15,7 @@ from block_data_store.repositories.filters import (
     FilterOperator,
     LogicalOperator,
     ParentFilter,
+    RootFilter,
     PropertyFilter,
     WhereClause,
 )
@@ -517,6 +518,91 @@ def test_query_blocks_supports_structural_and_parent_filters(repository, block_f
         limit=1,
     )
     assert len(limited) == 1
+
+
+def test_query_blocks_supports_root_filters(repository, block_factory):
+    document_controls_id = uuid4()
+    document_policies_id = uuid4()
+    dataset_controls_id = uuid4()
+    dataset_policies_id = uuid4()
+    record_controls_id = uuid4()
+    record_policies_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_controls_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_controls_id,
+                children_ids=(dataset_controls_id,),
+                properties={"title": "Controls Handbook"},
+            ),
+            block_factory(
+                block_id=document_policies_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_policies_id,
+                children_ids=(dataset_policies_id,),
+                properties={"title": "Policies Handbook"},
+            ),
+            block_factory(
+                block_id=dataset_controls_id,
+                block_type=BlockType.DATASET,
+                parent_id=document_controls_id,
+                root_id=document_controls_id,
+                children_ids=(record_controls_id,),
+                properties={"dataset_type": "controls"},
+            ),
+            block_factory(
+                block_id=dataset_policies_id,
+                block_type=BlockType.DATASET,
+                parent_id=document_policies_id,
+                root_id=document_policies_id,
+                children_ids=(record_policies_id,),
+                properties={"dataset_type": "policies"},
+            ),
+            block_factory(
+                block_id=record_controls_id,
+                block_type=BlockType.RECORD,
+                parent_id=dataset_controls_id,
+                root_id=document_controls_id,
+                content=Content(data={"category": "Preventive"}),
+            ),
+            block_factory(
+                block_id=record_policies_id,
+                block_type=BlockType.RECORD,
+                parent_id=dataset_policies_id,
+                root_id=document_policies_id,
+                content=Content(data={"category": "Detective"}),
+            ),
+        ]
+    )
+
+    controls_records = repository.query_blocks(
+        where=WhereClause(type=BlockType.RECORD),
+        root=RootFilter(
+            where=WhereClause(type=BlockType.DOCUMENT),
+            property_filter=PropertyFilter(
+                path="properties.title",
+                value="Controls Handbook",
+            ),
+        ),
+    )
+
+    assert [block.id for block in controls_records] == [record_controls_id]
+
+    policies_datasets = repository.query_blocks(
+        where=WhereClause(type=BlockType.DATASET),
+        root=RootFilter(
+            property_filter=PropertyFilter(
+                path="properties.title",
+                value="Policies Handbook",
+            ),
+        ),
+    )
+
+    assert [block.id for block in policies_datasets] == [dataset_policies_id]
 
 
 def test_query_blocks_supports_nested_json_paths_and_operators(repository, block_factory):

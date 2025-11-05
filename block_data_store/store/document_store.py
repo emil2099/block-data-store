@@ -16,6 +16,7 @@ from block_data_store.repositories.block_repository import BlockRepository
 from block_data_store.repositories.filters import (
     FilterExpression,
     ParentFilter,
+    RootFilter,
     WhereClause,
 )
 
@@ -109,6 +110,7 @@ class DocumentStore:
         where: WhereClause | None = None,
         property_filter: FilterExpression | None = None,
         parent: ParentFilter | None = None,
+        root: RootFilter | None = None,
         limit: int | None = None,
     ) -> list[Block]:
         """Delegate block queries so higher layers only depend on the store."""
@@ -116,6 +118,7 @@ class DocumentStore:
             where=where,
             property_filter=property_filter,
             parent=parent,
+            root=root,
             limit=limit,
         )
 

@@ -88,6 +88,14 @@ class ParentFilter:
     property_filter: "FilterExpression | None" = None
 
 
+@dataclass(frozen=True, slots=True)
+class RootFilter:
+    """Composite filter applied to a block's root document."""
+
+    where: WhereClause | None = None
+    property_filter: "FilterExpression | None" = None
+
+
 def apply_structural_filters(query, model, where: WhereClause):
     """Apply structural filters (type/parent/root) to a SQLAlchemy query."""
     if where.type is not None:
@@ -229,6 +237,7 @@ __all__ = [
     "FilterOperator",
     "LogicalOperator",
     "ParentFilter",
+    "RootFilter",
     "PropertyFilter",
     "WhereClause",
     "apply_structural_filters",

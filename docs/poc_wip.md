@@ -7,43 +7,51 @@ References
 - Full spec: `docs/decipher_full_specification.md`
 - POC spec: `docs/decipher_poc_specification.md`
 
-## Current State (2025-10-25)
+## Current State (2025-11-05)
 
 - **Model layer:** `block_data_store/models/blocks/*.py` now houses per-type block/props classes plus the shared base (`Block`, `BlockType`, `Content`), keeping the implementation modular while aligning with Appendix A’s typed properties/content guidance.
 - **Parser & ingestion:** The Mistune-backed pipeline in `block_data_store/parser/markdown_parser.py` converts Markdown headings, paragraphs, bullet lists, and ````dataset:*```` fences into block hierarchies, including derived dataset/record children. Sample source assets under `data/` and the `scripts/demo_ingest.py` helper exercise this flow end-to-end.
 - **Persistence & repository:** `block_data_store/db/schema.py` + `db/engine.py` expose SQLAlchemy models, session/engine helpers, and optional persistent SQLite URLs. `block_data_store/repositories/block_repository.py` implements depth-aware `get_block`, structural mutations (`set_children`, `reorder_children`, `move_block`), and quorum validation (duplicate/loop/root guards).
 - **Filtering:** `block_data_store/repositories/filters.py` plus repository helpers provide structural `WhereClause`, parent scoping, nested JSON property filters, boolean composition, and operator coverage (`equals`, `not_equals`, `in`, `contains`) aligned with the spec’s filtering section.
-- **Tooling, fixtures, and tests:** `tests/` now cover repository flows, parser output, engine configuration, renderer output, and DocumentStore-based round trips (`tests/test_round_trip.py`). `tests/conftest.py` optionally points at Postgres, though we still trigger SQLite by default. Sample data + script (`data/secondary_tree_example.json`, `scripts/load_secondary_tree_example.py`) provide a realistic scenario that can be seeded into SQLite for manual verification alongside notebooks (`notebooks/poc_walkthrough.ipynb`).
+- **Tooling, fixtures, and tests:** `tests/` cover repository flows, parser output, engine configuration, renderer output, and DocumentStore-based round trips (`tests/test_round_trip.py`). Postgres runs are supported when `POSTGRES_TEST_URL` or `DATABASE_URL` is set (see `tests/conftest.py`); otherwise tests default to SQLite. Sample data + script (`data/secondary_tree_example.json`, `scripts/load_secondary_tree_example.py`) provide a realistic scenario that can be seeded into SQLite for manual verification alongside notebooks (`notebooks/poc_walkthrough.ipynb`).
 - **Document Store seam:** `block_data_store/store/document_store.py` now exposes document fetch helpers plus secondary-tree support via `get_page_group`, resolving `synced` children into canonical blocks while preserving structural metadata.
 - **Document Store seam:** `block_data_store/store/document_store.py` now exposes `get_root_tree` (main document) plus slice support via `get_slice`, resolving `synced` children into reusable views while preserving structural metadata; ingestion and one-off block lookups are routed through the store.
-- **UI / renderer layers:** Renderer strategies, secondary-tree handling, and the NiceGUI UI are still missing; the nascent document-store façade only covers canonical trees, so most higher-level orchestration remains unimplemented.
+- **UI / renderer layers:** Markdown renderer is live and the NiceGUI demo now covers navigation, edits, and filtering (full block/parent/root forms plus quick actions) alongside previews; inline documentation and HTML renderer remain open.
 
-## Design Deviation Alerts (spec drift watchlist)
+## Scope Adjustments (POC focus)
 
-- **Typed block subclasses & multi-part content** (full spec §2 + Appendix A): Core support exists, but we still need to enforce `properties_version` semantics and stay disciplined as new block types arrive.
-- **Secondary trees & synced/page_group blocks** (full spec Appendix A.5; POC spec §2): Read-side resolution is live (DocumentStore + renderer coverage); authoring/mutation flows are deferred beyond the POC scope.
-- **Renderer + NiceGUI deliverables** (POC spec §§2–3 & Deliverables table): Markdown renderer is done and the NiceGUI prototype now exercises the document store end to end; HTML output still needs implementation to complete the renderer stack.
+- HTML renderer: deferred beyond current POC.
+- Extended parser coverage (tables, callouts, page-level constructs): deferred.
+- `properties_version` semantics: deferred.
+- Secondary-tree authoring/mutations: deferred (read path validated and retained).
+- Extra repository invariants hardening: nice-to-have; not required for POC.
 
 ## Remaining Scope vs Spec
 
 | Area | Spec reference | Status | Notes / Next Steps |
 | --- | --- | --- | --- |
 | Model layer / Data Model | Full spec §2 & Appendix A (`docs/decipher_full_specification.md:18-309`) | 🟢 Substantial | Typed property/content models and discriminated block subclasses implemented (incl. repo/parser/test updates); next steps: optional `properties_version` semantics and expanding block coverage as new types emerge. |
-| Parser & ingestion | POC spec §2–3 (`docs/decipher_poc_specification.md:13-46`) | ✅ Baseline | Extend coverage for tables/callouts/page-level constructs and emit placeholders for secondary trees so downstream layers can validate them. |
-| Repository & DB layer | Full spec Appendix B (`docs/decipher_full_specification.md:318-360`) | ✅ Core | Keep strengthening invariants, add Postgres CI runs, and prepare to offload orchestration into a Document Store façade. |
-| Document Store orchestration | Full spec §7 (`docs/decipher_full_specification.md:125-140`) | 🟢 Validated | Façade handles canonical fetches plus page-group/synced resolution; future mutation tooling can wait until post-POC feature work. |
-| Secondary trees & synced/page_group blocks | Full spec Appendix A.5 (`docs/decipher_full_specification.md:253-289`) + POC spec objective 2 | 🟢 Validated | Read-side modelling/resolution (page groups + synced refs) is implemented via DocumentStore; no further mutation flows are required for the POC. Focus shifts to renderer/UI consumers. |
-| Renderer (Markdown + HTML) | Full spec §§5 & Appendix D (`docs/decipher_full_specification.md:72-113, 459-517`) + POC deliverables (`docs/decipher_poc_specification.md:69-80`) | 🟡 Markdown ready | Markdown renderer shipped (synced-aware, metadata toggles); HTML renderer + UI wiring still pending. |
-| NiceGUI app | POC spec §3 Demonstrations (`docs/decipher_poc_specification.md:37-46`) | 🟡 Prototype | `apps/nicegui_demo.py` seeds sample Markdown, lists documents, shows the block tree, filters, renders Markdown, and edits metadata/properties; next steps: wire in HTML renderer once available and add smoke tests. |
-| Notebook + performance instrumentation | POC spec §§2–3 & Success Criteria (`docs/decipher_poc_specification.md:13-46, 84-92`) | 🟡 Needs follow-through | Upgrade `notebooks/poc_walkthrough.ipynb` to run the full lifecycle, capture timings/query counts, and validate Postgres parity. |
-| Test suite & performance coverage | POC spec §3 Quality (`docs/decipher_poc_specification.md:48-55`) | 🟡 Partial | Add tests for secondary trees, renderer output, document-store orchestration, and concurrency/performance baselines (including Postgres runs). |
+| Parser & ingestion | POC spec §2–3 (`docs/decipher_poc_specification.md:13-46`) | ✅ Baseline | Extended coverage (tables/callouts/page-level constructs) deferred; current baseline is acceptable for POC. |
+| Repository & DB layer | Full spec Appendix B (`docs/decipher_full_specification.md:318-360`) | ✅ Core | Tests already support Postgres via env var; default remains SQLite. CI job for Postgres is optional and can be added later if needed. |
+| Document Store orchestration | Full spec §7 (`docs/decipher_full_specification.md:125-140`) | 🟢 Validated | Façade handles canonical fetches plus page-group/synced resolution; mutations remain out of scope. |
+| Secondary trees & synced/page_group blocks | Full spec Appendix A.5 (`docs/decipher_full_specification.md:253-289`) + POC spec objective 2 | 🟢 Validated | Read-side modelling/resolution (page groups + synced refs) is implemented; authoring/mutation flows deferred. |
+| Renderer (Markdown) | Full spec §§5 & Appendix D (`docs/decipher_full_specification.md:72-113, 459-517`) + POC deliverables (`docs/decipher_poc_specification.md:69-80`) | 🟢 Ready | Markdown renderer shipped (synced-aware, metadata toggles); HTML renderer deferred. |
+| NiceGUI app | POC spec §3 Demonstrations (`docs/decipher_poc_specification.md:37-46`) | 🟡 Prototype | Demo loads/seeds, lists documents, shows tree, filters (full block/parent/root controls), renders Markdown, and edits metadata/properties; next: document UI actions and inline help. |
+| Notebook + performance instrumentation | POC spec §§2–3 & Success Criteria (`docs/decipher_poc_specification.md:13-46, 84-92`) | 🟡 Needs follow-through | Capture timings/query counts and validate Postgres parity in notebook + pytest markers. |
+| Test suite & performance coverage | POC spec §3 Quality (`docs/decipher_poc_specification.md:48-55`) | 🟡 Partial | Add performance-focused tests/markers; broaden backend coverage via env-configured Postgres runs. |
 
 ## Plan (Prioritised Next Work)
 
-1. **HTML renderer + formatting polish:** Mirror the Markdown renderer’s coverage for HTML output, ensuring parity for synced refs/metadata toggles.
-2. **NiceGUI polish + HTML wiring:** Hook the UI into the upcoming HTML renderer, add minimal smoke tests, and document how to launch the demo.
-3. **Notebook + performance instrumentation:** Finalise the Jupyter walkthrough, capture timings/query counts, and run side-by-side SQLite/Postgres exercises.
-4. **Testing & observability expansion:** Extend pytest coverage for renderers/UI adapters and automate Postgres runs to ensure portability.
+1. Performance & metrics: add pytest performance markers and capture timings/query counts for ingestion, fetch depths, filtering, and rendering; summarise in notebook.
+2. NiceGUI documentation: inline help for major actions (load, select, edit/save, renderer toggles) and error/empty states.
+
+## Postgres Test Execution
+
+- Tests run against Postgres when either `POSTGRES_TEST_URL` or `DATABASE_URL` is set (see `tests/conftest.py`).
+- Without these variables, tests default to in-memory SQLite.
+- Example:
+  - `export POSTGRES_TEST_URL=postgresql+psycopg://user:pass@localhost:5432/blocks`
+  - `pytest -q`
 
 ## Not In Scope (POC)
 
@@ -52,12 +60,13 @@ References
 
 ## Risks and Open Questions
 
-- Secondary-tree + renderer scope is still ahead; without it we cannot meet the “Markdown → Renderer → UI” success criteria.
-- Cross-database JSON function parity is only manually verified; automated Postgres coverage is required before we can trust portability claims.
-- UI scope creep remains a concern—NiceGUI should stay minimal and purely for validation.
+- Performance baselines may fluctuate across backends; pin simple thresholds and review deltas in notebook/CI output.
+- Cross-database JSON function parity is only manually verified; continue running the suite with a Postgres URL locally until CI is added (optional).
+- UI scope creep remains a concern—NiceGUI should stay minimal and purely for validation while adding just the requested docs/filters.
 
 ## Work Log
 
+- 2025-11-05: Added repository-level `RootFilter` support with tests and expanded the NiceGUI filter panel to mirror block-level controls for parent/root contexts (plus quick actions and result summaries); refreshed the plan to focus on documentation and performance metrics.
 - 2025-10-25: Completed the typed block/content retrofit, extended DocumentStore for page-group & synced reads, added the secondary-tree sample + loader, delivered the Markdown renderer with unit tests, and added a DocumentStore-driven Markdown round-trip test.
 - 2025-10-23: Laid the groundwork with persistence/filtering upgrades (JSON filters, boolean logic, Postgres fixtures) and refreshed the plan to align with the spec.
 - 2025-10-29: Reviewed the revised storage-layer summary; flagged that callers still construct/use the repository directly (DocumentStore factories, renderer callbacks, `scripts/load_secondary_tree_example.py`), which conflicts with the “domain service as single entry point” guidance.

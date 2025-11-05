@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import ast
 from pathlib import Path
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from uuid import UUID
 
 from nicegui import events, ui
@@ -24,7 +24,13 @@ from block_data_store.models.block import Block, BlockType, Content
 from block_data_store.parser import load_markdown_path
 from block_data_store.renderers.base import RenderOptions
 from block_data_store.renderers.markdown import MarkdownRenderer
-from block_data_store.repositories.filters import FilterOperator, PropertyFilter, WhereClause
+from block_data_store.repositories.filters import (
+    FilterOperator,
+    ParentFilter,
+    PropertyFilter,
+    RootFilter,
+    WhereClause,
+)
 from block_data_store.store import DocumentStore, create_document_store
 
 DB_PATH = Path(__file__).resolve().parent / "nicegui_demo.db"
@@ -56,6 +62,7 @@ class AppState:
     resolve_synced_checkbox: Any | None = None
     include_children_checkbox: Any | None = None
     render_block_children: bool = True
+    filter_summary: str = ""
 
 
 def _document_label(block: Block) -> str:
@@ -79,6 +86,61 @@ def _block_label(block: Block) -> str:
             key, value = next(iter(data.items()))
             return f"{block.type.value}: {key}={value}"
     return f"{block.type.value}: {block.id}"
+
+
+def _short_id(value: UUID | str | None) -> str:
+    if value is None:
+        return "?"
+    return str(value)[:8]
+
+
+def _resolve_block(state: AppState, block_id: str | None) -> Block | None:
+    if not block_id:
+        return None
+    cached = state.block_cache.get(block_id)
+    if cached is not None:
+        return cached
+    try:
+        fetched = state.store.get_block(UUID(block_id), depth=1)
+    except Exception:
+        return None
+    if fetched is not None:
+        state.block_cache[block_id] = fetched
+    return fetched
+
+
+def _set_filter_results(state: AppState, blocks: Iterable[Block], summary: str) -> None:
+    state.filter_results = list(blocks)
+    state.filter_summary = summary
+    _render_filter_results(state)
+
+
+def _build_property_filter_from_inputs(
+    path_value: str | None,
+    operator_value: str | None,
+    raw_value: str | None,
+) -> PropertyFilter | None:
+    path = (path_value or "").strip()
+    value_text = (raw_value or "").strip()
+    if not path or not value_text:
+        return None
+
+    operator = FilterOperator.CONTAINS if operator_value == "contains" else FilterOperator.EQUALS
+
+    coerced_value: Any = value_text
+    try:
+        coerced_value = ast.literal_eval(value_text)
+    except Exception:
+        lowered = value_text.lower()
+        if lowered == "true":
+            coerced_value = True
+        elif lowered == "false":
+            coerced_value = False
+
+    try:
+        return PropertyFilter(path=path, value=coerced_value, operator=operator)
+    except Exception as exc:  # pragma: no cover - user input validation
+        raise ValueError(f"Invalid filter definition for '{path}': {exc}") from exc
 
 
 def _bootstrap_state() -> AppState:
@@ -256,6 +318,8 @@ def _load_document(state: AppState, document_id: str | None) -> None:
         if state.data_area:
             state.data_area.value = "{}"
         _render_document_markdown(state, None)
+        state.filter_results = []
+        state.filter_summary = ""
         return
 
     root_uuid = UUID(doc_value)
@@ -280,6 +344,8 @@ def _load_document(state: AppState, document_id: str | None) -> None:
 
     if state.filter_results_container:
         state.filter_results_container.clear()
+    state.filter_results = []
+    state.filter_summary = ""
 
 
 def _refresh_documents(state: AppState, selected: str | None = None) -> None:
@@ -318,6 +384,11 @@ def _render_filter_results(state: AppState) -> None:
         return
     container.clear()
     with container:
+        summary = state.filter_summary.strip()
+        count = len(state.filter_results)
+        if summary:
+            result_word = "result" if count == 1 else "results"
+            ui.label(f"{summary} — {count} {result_word}").classes("text-xs text-slate-500")
         if not state.filter_results:
             ui.label("No blocks matched.").classes("text-sm text-slate-500")
             return
@@ -348,6 +419,14 @@ def _apply_filter(
     path_value: str,
     operator_value: str,
     filter_value: str,
+    parent_type_value: str,
+    parent_path_value: str,
+    parent_operator_value: str,
+    parent_filter_value: str,
+    root_type_value: str,
+    root_path_value: str,
+    root_operator_value: str,
+    root_filter_value: str,
 ) -> None:
     where_kwargs: dict[str, Any] = {}
     if state.selected_document_id:
@@ -357,32 +436,157 @@ def _apply_filter(
 
     where_clause = WhereClause(**where_kwargs) if where_kwargs else None
 
-    property_filter = None
-    path = (path_value or "").strip()
-    value = (filter_value or "").strip()
-    if path and value:
-        operator = FilterOperator.CONTAINS if operator_value == "contains" else FilterOperator.EQUALS
-        coerced_value: Any = value
-        try:
-            coerced_value = ast.literal_eval(value)
-        except Exception:
-            lowered = value.lower()
-            if lowered == "true":
-                coerced_value = True
-            elif lowered == "false":
-                coerced_value = False
+    try:
+        property_filter = _build_property_filter_from_inputs(path_value, operator_value, filter_value)
+    except ValueError as exc:
+        ui.notify(str(exc), color="negative")
+        return
 
-        try:
-            property_filter = PropertyFilter(path=path, value=coerced_value, operator=operator)
-        except Exception as exc:
-            raise ValueError(f"Invalid filter definition: {exc}") from exc
+    try:
+        parent_property_filter = _build_property_filter_from_inputs(
+            parent_path_value,
+            parent_operator_value,
+            parent_filter_value,
+        )
+    except ValueError as exc:
+        ui.notify(str(exc), color="negative")
+        return
 
-    state.filter_results = state.store.query_blocks(
+    try:
+        root_property_filter = _build_property_filter_from_inputs(
+            root_path_value,
+            root_operator_value,
+            root_filter_value,
+        )
+    except ValueError as exc:
+        ui.notify(str(exc), color="negative")
+        return
+
+    parent_where_kwargs: dict[str, Any] = {}
+    if parent_type_value and parent_type_value != "all":
+        parent_where_kwargs["type"] = BlockType(parent_type_value)
+
+    parent_filter = None
+    if parent_where_kwargs or parent_property_filter is not None:
+        parent_filter = ParentFilter(
+            where=WhereClause(**parent_where_kwargs) if parent_where_kwargs else None,
+            property_filter=parent_property_filter,
+        )
+
+    root_where_kwargs: dict[str, Any] = {}
+    if root_type_value and root_type_value != "all":
+        root_where_kwargs["type"] = BlockType(root_type_value)
+
+    root_filter = None
+    if root_where_kwargs or root_property_filter is not None:
+        root_filter = RootFilter(
+            where=WhereClause(**root_where_kwargs) if root_where_kwargs else None,
+            property_filter=root_property_filter,
+        )
+
+    results = state.store.query_blocks(
         where=where_clause,
         property_filter=property_filter,
+        parent=parent_filter,
+        root=root_filter,
         limit=50,
     )
-    _render_filter_results(state)
+
+    summary_bits: list[str] = []
+    if block_type_value and block_type_value != "all":
+        summary_bits.append(f"type = {block_type_value}")
+    if property_filter is not None:
+        summary_bits.append(f"{property_filter.path} {operator_value} {filter_value}")
+    if state.selected_document_id and (not where_clause or where_clause.root_id):
+        summary_bits.append(f"root {_short_id(state.selected_document_id)}")
+
+    if parent_filter is not None:
+        parent_bits: list[str] = []
+        if parent_filter.where and parent_filter.where.type:
+            parent_type = (
+                parent_filter.where.type.value
+                if isinstance(parent_filter.where.type, BlockType)
+                else str(parent_filter.where.type)
+            )
+            parent_bits.append(f"type = {parent_type}")
+        if parent_property_filter is not None:
+            parent_bits.append(
+                f"{parent_property_filter.path} {parent_operator_value} {parent_filter_value}"
+            )
+        if parent_bits:
+            summary_bits.append(f"parent({'; '.join(parent_bits)})")
+
+    if root_filter is not None:
+        root_bits: list[str] = []
+        if root_filter.where and root_filter.where.type:
+            root_type = (
+                root_filter.where.type.value
+                if isinstance(root_filter.where.type, BlockType)
+                else str(root_filter.where.type)
+            )
+            root_bits.append(f"type = {root_type}")
+        if root_property_filter is not None:
+            root_bits.append(
+                f"{root_property_filter.path} {root_operator_value} {root_filter_value}"
+            )
+        if root_bits:
+            summary_bits.append(f"root({'; '.join(root_bits)})")
+
+    summary_text = "; ".join(summary_bits) if summary_bits else "Custom filter"
+
+    _set_filter_results(state, results, summary_text)
+
+
+def _filter_by_parent(state: AppState) -> None:
+    if not state.selected_block_id:
+        ui.notify("Select a block to filter by its parent.", color="warning")
+        return
+
+    parent_block = _resolve_block(state, state.selected_block_id)
+    if parent_block is None:
+        ui.notify("Unable to resolve selected block.", color="negative")
+        return
+
+    results = state.store.query_blocks(
+        where=WhereClause(parent_id=state.selected_block_id),
+        limit=50,
+    )
+    label = _block_label(parent_block)
+    summary = f"Children of {label} ({_short_id(parent_block.id)})"
+    _set_filter_results(state, results, summary)
+
+
+def _filter_by_root(state: AppState) -> None:
+    target_root_id: str | None = None
+    root_label: str | None = None
+
+    if state.selected_block_id:
+        block = _resolve_block(state, state.selected_block_id)
+        if block is None:
+            ui.notify("Unable to resolve selected block.", color="negative")
+            return
+        target_root_id = str(block.root_id)
+        root_block = state.documents_by_id.get(target_root_id) or _resolve_block(state, target_root_id)
+        root_label = _document_label(root_block) if root_block else f"Root {_short_id(target_root_id)}"
+    elif state.selected_document_id:
+        target_root_id = state.selected_document_id
+        root_block = state.documents_by_id.get(target_root_id) or _resolve_block(state, target_root_id)
+        root_label = _document_label(root_block) if root_block else f"Root {_short_id(target_root_id)}"
+    else:
+        ui.notify("Select a document or block before filtering by root.", color="warning")
+        return
+
+    if target_root_id is None:
+        ui.notify("Unable to determine root identifier.", color="negative")
+        return
+
+    results = state.store.query_blocks(
+        where=WhereClause(root_id=target_root_id),
+        limit=100,
+    )
+    label = root_label or f"Root {_short_id(target_root_id)}"
+    summary = f"Blocks in {label}"
+    _set_filter_results(state, results, summary)
 
 
 def _save_block_changes(state: AppState) -> None:
@@ -489,7 +693,7 @@ def build_ui(state: AppState) -> None:
             ).props("bordered").classes("w-full rounded-lg border p-2 overflow-auto").style("height: 50vh;")
 
             with ui.card().classes("w-full"):
-                ui.label("Filter Blocks").classes("text-sm font-semibold")
+                ui.label("Block filters").classes("text-sm font-semibold")
                 type_select = ui.select(
                     options=["all"] + [bt.value for bt in BlockType],
                     label="Block type",
@@ -509,6 +713,48 @@ def build_ui(state: AppState) -> None:
                     placeholder="Search value",
                 ).props("outlined dense").classes("w-full")
 
+                ui.separator().classes("my-2")
+                ui.label("Parent filters (optional)").classes("text-xs font-semibold text-slate-500")
+                parent_type_select = ui.select(
+                    options=["all"] + [bt.value for bt in BlockType],
+                    label="Parent type",
+                    value="all",
+                ).props("outlined dense").classes("w-full")
+                parent_path_input = ui.input(
+                    label="Parent JSON path",
+                    placeholder="properties.title",
+                ).props("outlined dense").classes("w-full")
+                parent_operator_select = ui.select(
+                    options=["contains", "equals"],
+                    label="Parent operator",
+                    value="contains",
+                ).props("outlined dense").classes("w-full")
+                parent_value_input = ui.input(
+                    label="Parent value",
+                    placeholder="Search value",
+                ).props("outlined dense").classes("w-full")
+
+                ui.separator().classes("my-2")
+                ui.label("Root filters (optional)").classes("text-xs font-semibold text-slate-500")
+                root_type_select = ui.select(
+                    options=["all"] + [bt.value for bt in BlockType],
+                    label="Root type",
+                    value="all",
+                ).props("outlined dense").classes("w-full")
+                root_path_input = ui.input(
+                    label="Root JSON path",
+                    placeholder="properties.title",
+                ).props("outlined dense").classes("w-full")
+                root_operator_select = ui.select(
+                    options=["contains", "equals"],
+                    label="Root operator",
+                    value="contains",
+                ).props("outlined dense").classes("w-full")
+                root_value_input = ui.input(
+                    label="Root value",
+                    placeholder="Search value",
+                ).props("outlined dense").classes("w-full")
+
                 ui.button(
                     "Apply filter",
                     on_click=lambda: _apply_filter(
@@ -517,8 +763,27 @@ def build_ui(state: AppState) -> None:
                         path_input.value,
                         operator_select.value,
                         value_input.value,
+                        parent_type_select.value,
+                        parent_path_input.value,
+                        parent_operator_select.value,
+                        parent_value_input.value,
+                        root_type_select.value,
+                        root_path_input.value,
+                        root_operator_select.value,
+                        root_value_input.value,
                     ),
                 ).classes("w-full")
+
+                ui.separator().classes("my-2")
+                ui.label("Quick filters").classes("text-xs font-semibold text-slate-500")
+                ui.button(
+                    "Children of selected block",
+                    on_click=lambda: _filter_by_parent(state),
+                ).props("outlined dense").classes("w-full")
+                ui.button(
+                    "Blocks in current root",
+                    on_click=lambda: _filter_by_root(state),
+                ).props("outlined dense").classes("w-full")
 
                 state.filter_results_container = ui.column().classes("w-full gap-1 mt-2")
 
