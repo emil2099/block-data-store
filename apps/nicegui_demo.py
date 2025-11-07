@@ -58,11 +58,18 @@ blocks, and preview renderer output.
 """
 
 OVERVIEW_CODE = """
+from pathlib import Path
+from block_data_store.db.engine import create_engine, create_session_factory
+from block_data_store.db.schema import create_all
 from block_data_store.parser import load_markdown_path
 from block_data_store.store import create_document_store
 
-blocks = load_markdown_path(path)
-store = create_document_store(session_factory)
+sqlite_path = Path("nicegui_demo.db")
+engine = create_engine(sqlite_path=sqlite_path)
+create_all(engine)
+store = create_document_store(create_session_factory(engine))
+
+blocks = load_markdown_path("data/sample.md")
 store.save_blocks(blocks)
 """
 
