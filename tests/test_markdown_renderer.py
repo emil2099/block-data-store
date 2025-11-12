@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import pytest
+
 from block_data_store.models.block import BlockType, Content
 from block_data_store.renderers import MarkdownRenderer, RenderOptions
 
@@ -77,35 +79,56 @@ def test_markdown_renderer_includes_metadata(block_factory):
     assert "> role: summary" in output
 
 
-def test_dataset_renderer_includes_child_records(block_factory):
+def test_dataset_renderer_converts_records_to_table(block_factory):
     dataset_id = uuid4()
-    record_id = uuid4()
+    record_a_id = uuid4()
+    record_b_id = uuid4()
 
     dataset = block_factory(
         block_id=dataset_id,
         block_type=BlockType.DATASET,
         parent_id=None,
         root_id=dataset_id,
-        children_ids=(record_id,),
-        properties={"category": "inventory"},
-        content=None,
+        children_ids=(record_a_id, record_b_id),
+        properties={
+            "title": "Inventory",
+            "data_schema": {
+                "columns": [
+                    {"key": "title", "title": "Title"},
+                    {"key": "status", "title": "Status"},
+                ]
+            },
+        },
     )
-    record = block_factory(
-        block_id=record_id,
+    record_a = block_factory(
+        block_id=record_a_id,
         block_type=BlockType.RECORD,
         parent_id=dataset_id,
         root_id=dataset_id,
-        content=Content(data={"title": "Item A", "status": "active"}),
+        content=Content(data={"title": "Item A", "status": "Active"}),
+    )
+    record_b = block_factory(
+        block_id=record_b_id,
+        block_type=BlockType.RECORD,
+        parent_id=dataset_id,
+        root_id=dataset_id,
+        content=Content(data={"title": "Item B", "status": "Retired"}),
     )
 
-    blocks = _wire([dataset, record])
+    blocks = _wire([dataset, record_a, record_b])
     renderer = MarkdownRenderer()
 
     output = renderer.render(blocks[dataset_id])
 
-    assert "```dataset:inventory" in output
-    assert "#### Item A" in output
-    assert "- **status**: active" in output
+    expected = (
+        "### Inventory\n\n"
+        "| Title | Status |\n"
+        "| :--- | :--- |\n"
+        "| Item A | Active |\n"
+        "| Item B | Retired |"
+    )
+
+    assert output == expected
 
 
 def test_markdown_renderer_renders_lists(block_factory):
@@ -243,10 +266,10 @@ def test_markdown_renderer_renders_lists(block_factory):
         "# Team Handbook\n\n"
         "## Purpose\n\n"
         "Our mission is to build simple data tools.\n\n"
-        "- Values\n"
-        "    - Customer Obsessed\n"
-        "    - Iterate fast\n"
-        "- Transparency\n\n"
+        "* Values\n"
+        "    * Customer Obsessed\n"
+        "    * Iterate fast\n"
+        "* Transparency\n\n"
         "1. Onboard\n"
         "2. Deliver\n"
         "    1. Kickoff\n"
@@ -332,3 +355,41 @@ def test_markdown_renderer_renders_html_block(block_factory):
     output = renderer.render(html)
 
     assert output == "<div>Note</div>"
+
+
+def test_object_renderer_renders_summary_and_json(block_factory):
+    obj = block_factory(
+        block_type=BlockType.OBJECT,
+        parent_id=None,
+        root_id=uuid4(),
+        content=Content(plain_text="Obligation", object={"id": "OB-1", "status": "Open"}),
+    )
+
+    renderer = MarkdownRenderer()
+    output = renderer.render(obj)
+
+    assert "Obligation" in output
+    assert "```json" in output
+    assert '"status": "Open"' in output
+
+
+@pytest.mark.parametrize(
+    ("block_type", "properties"),
+    [
+        (BlockType.DERIVED_CONTENT_CONTAINER, {"category": "obligations"}),
+        (BlockType.GROUP_INDEX, {"group_index_type": "page"}),
+        (BlockType.PAGE_GROUP, {"page_number": 1}),
+        (BlockType.CHUNK_GROUP, {}),
+    ],
+)
+def test_structural_blocks_render_empty_output(block_factory, block_type, properties):
+    block = block_factory(
+        block_type=block_type,
+        parent_id=None,
+        root_id=uuid4(),
+        properties=properties,
+        content=Content(plain_text="hidden"),
+    )
+
+    renderer = MarkdownRenderer()
+    assert renderer.render(block).strip() == ""
