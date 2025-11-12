@@ -605,6 +605,55 @@ def test_query_blocks_supports_root_filters(repository, block_factory):
     assert [block.id for block in policies_datasets] == [dataset_policies_id]
 
 
+def test_soft_delete_hides_blocks_and_descendants(repository, block_factory):
+    document_id = uuid4()
+    heading_id = uuid4()
+    paragraph_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+                children_ids=(heading_id,),
+            ),
+            block_factory(
+                block_id=heading_id,
+                block_type=BlockType.HEADING,
+                parent_id=document_id,
+                root_id=document_id,
+                children_ids=(paragraph_id,),
+            ),
+            block_factory(
+                block_id=paragraph_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_id,
+                root_id=document_id,
+            ),
+        ]
+    )
+
+    repository.set_in_trash([heading_id], in_trash=True)
+
+    assert repository.get_block(heading_id) is None
+    assert repository.get_block(paragraph_id) is None
+
+    paragraphs = repository.query_blocks(where=WhereClause(type=BlockType.PARAGRAPH))
+    assert paragraphs == []
+
+    document = repository.get_block(document_id, depth=0)
+    assert document is not None
+    assert document.children_ids == (heading_id,)
+
+    repository.set_in_trash([heading_id], in_trash=False)
+
+    restored_paragraph = repository.get_block(paragraph_id)
+    assert restored_paragraph is not None
+    assert restored_paragraph.parent_id == heading_id
+
+
 def test_query_blocks_supports_nested_json_paths_and_operators(repository, block_factory):
     document_id = uuid4()
     dataset_id = uuid4()

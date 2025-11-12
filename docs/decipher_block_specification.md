@@ -597,6 +597,7 @@ The soft-delete mechanism is defined by the following principles:
 
 - **The in_trash Flag:** Deletion state is managed by the in_trash boolean flag in the Base Block Schema. A TRUE value indicates the block is considered "in the trash".
 - **Non-Cascading Writes:** When a parent block is moved to the trash, **only that specific block's in_trash flag is set to TRUE**. All of its descendants remain unchanged in the database but are considered *implicitly* trashed by inheritance.
+- **Canonical Structures Stay Intact:** Neither the repository nor the store rewrites children_ids when a child is hidden. The canonical order is always persisted exactly as authored so future writes can reuse the same block instances without losing references.
 - **Instantaneous Operations:** This model ensures that both delete and restore operations are single, atomic database updates, making them feel instantaneous to the user regardless of the number of child blocks.
 
 **2. Critical Implementation Requirement: Hierarchy-Aware Queries**
@@ -612,6 +613,8 @@ The choice of a non-cascading write model introduces a non-negotiable requiremen
 > 
 
 This is the foundational integrity constraint for the entire system. Building this logic into the core data access layer from the beginning is essential to prevent deleted content from appearing in any part of the application.
+
+In practice, the repository filters visibility (via a recursive CTE) but still returns canonical models. Consumers such as renderers or the Document Store simply skip children that fail to resolve, ensuring that read views stay clean without mutating the persisted structure.
 
 **3. Staged Implementation Strategy**
 

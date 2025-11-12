@@ -137,3 +137,59 @@ def test_set_children_without_version(document_store, repository, block_factory)
     assert section.children_ids == (para_b, para_a)
 
 
+def test_soft_deleted_children_are_filtered(document_store, repository, block_factory):
+    document_id = uuid4()
+    heading_id = uuid4()
+    paragraph_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+                children_ids=(heading_id,),
+            ),
+            block_factory(
+                block_id=heading_id,
+                block_type=BlockType.HEADING,
+                parent_id=document_id,
+                root_id=document_id,
+                properties={"level": 2},
+                children_ids=(paragraph_id,),
+            ),
+            block_factory(
+                block_id=paragraph_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_id,
+                root_id=document_id,
+            ),
+        ]
+    )
+
+    document_store.set_in_trash([heading_id], in_trash=True)
+
+    document = document_store.get_root_tree(document_id, depth=None)
+    assert document.children_ids == (heading_id,)
+    assert document.children() == []
+
+
+def test_trashing_document_makes_root_inaccessible(document_store, repository, block_factory):
+    document_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+            )
+        ]
+    )
+
+    document_store.set_in_trash([document_id], in_trash=True)
+
+    with pytest.raises(DocumentStoreError):
+        document_store.get_root_tree(document_id, depth=0)

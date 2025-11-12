@@ -60,6 +60,7 @@ class Block(BaseModel):
     root_id: UUID
     children_ids: tuple[UUID, ...] = Field(default_factory=tuple)
     workspace_id: UUID | None = None
+    in_trash: bool = False
     version: int = 0
     created_time: datetime
     last_edited_time: datetime

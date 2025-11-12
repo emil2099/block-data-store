@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from block_data_store.db.schema import DbBlock
@@ -48,7 +49,10 @@ class BlockRepository:
             raise ValueError("Depth must be a non-negative integer or None.")
 
         with self._session_factory() as session:
-            db_row = session.get(DbBlock, str(block_id))
+            trashed = self._trashed_target_subquery()
+            query = session.query(DbBlock).filter(DbBlock.id == str(block_id))
+            query = self._only_visible(query, trashed)
+            db_row = query.one_or_none()
             if db_row is None:
                 return None
 
@@ -71,6 +75,7 @@ class BlockRepository:
     ) -> list[Block]:
         """Return blocks matching structural and semantic filters."""
         with self._session_factory() as session:
+            trashed = self._trashed_target_subquery()
             query = session.query(DbBlock)
 
             if root is not None:
@@ -99,6 +104,8 @@ class BlockRepository:
             if property_filter is not None:
                 query = query.filter(build_filter_expression(DbBlock, property_filter))
 
+            query = self._only_visible(query, trashed)
+
             if limit is not None:
                 query = query.limit(limit)
 
@@ -115,6 +122,23 @@ class BlockRepository:
             for block in blocks:
                 payload = self._to_record(block)
                 session.merge(DbBlock(**payload))
+            session.commit()
+
+    def set_in_trash(self, block_ids: Sequence[UUID], *, in_trash: bool) -> None:
+        """Update the trash flag for a list of blocks."""
+        id_list = [str(block_id) for block_id in block_ids]
+        if not id_list:
+            return
+
+        with self._session_factory() as session:
+            rows = session.query(DbBlock).filter(DbBlock.id.in_(id_list)).all()
+            if len(rows) != len(id_list):
+                found_ids = {row.id for row in rows}
+                missing = [block_id for block_id in id_list if block_id not in found_ids]
+                raise BlockNotFoundError(f"Block(s) {missing} do not exist.")
+            for row in rows:
+                row.in_trash = in_trash
+                row.version += 1
             session.commit()
 
     def set_children(
@@ -286,6 +310,7 @@ class BlockRepository:
             root_id=UUID(record.root_id),
             children_ids=tuple(UUID(child_id) for child_id in children_raw),
             workspace_id=UUID(record.workspace_id) if record.workspace_id else None,
+            in_trash=record.in_trash,
             version=record.version,
             created_time=record.created_time,
             last_edited_time=record.last_edited_time,
@@ -314,6 +339,7 @@ class BlockRepository:
             "root_id": str(block.root_id),
             "children_ids": [str(child_id) for child_id in block.children_ids],
             "workspace_id": str(block.workspace_id) if block.workspace_id else None,
+            "in_trash": block.in_trash,
             "version": block.version,
             "created_time": block.created_time,
             "last_edited_time": block.last_edited_time,
@@ -403,6 +429,9 @@ class BlockRepository:
         cache: dict[UUID, Block],
     ) -> None:
         """Populate cache with blocks up to the requested depth."""
+        if root_row.in_trash:
+            return
+
         block = self._to_model(root_row)
         cache[block.id] = block
 
@@ -424,7 +453,7 @@ class BlockRepository:
 
         for child_id in children_ids:
             child_row = row_by_id.get(child_id)
-            if child_row is None:
+            if child_row is None or child_row.in_trash:
                 continue
             child_uuid = UUID(child_row.id)
             if child_uuid in cache:
@@ -464,6 +493,37 @@ class BlockRepository:
             )
 
         return wired_cache
+
+    @staticmethod
+    def _trashed_target_subquery():
+        visibility = select(
+            DbBlock.id.label("id"),
+            DbBlock.parent_id.label("parent_id"),
+            DbBlock.in_trash.label("in_trash"),
+            DbBlock.id.label("target_id"),
+        ).cte("block_visibility", recursive=True)
+
+        visibility = visibility.union_all(
+            select(
+                DbBlock.id,
+                DbBlock.parent_id,
+                DbBlock.in_trash,
+                visibility.c.target_id,
+            ).where(DbBlock.id == visibility.c.parent_id)
+        )
+
+        return (
+            select(visibility.c.target_id)
+            .where(visibility.c.in_trash.is_(True))
+            .distinct()
+            .subquery()
+        )
+
+    @staticmethod
+    def _only_visible(query, trashed_subquery):
+        return query.outerjoin(trashed_subquery, DbBlock.id == trashed_subquery.c.target_id).filter(
+            trashed_subquery.c.target_id.is_(None)
+        )
 
     def _with_resolvers(self, block: Block) -> Block:
         """Attach navigation resolvers to a block instance."""

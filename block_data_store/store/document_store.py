@@ -5,10 +5,7 @@ from __future__ import annotations
 from typing import Sequence
 from uuid import UUID
 
-from block_data_store.models.block import (
-    Block,
-    BlockType,
-)
+from block_data_store.models.block import Block, BlockType
 from block_data_store.repositories.block_repository import BlockRepository
 from block_data_store.repositories.filters import (
     FilterExpression,
@@ -118,6 +115,10 @@ class DocumentStore:
         if not blocks:
             return
         self._repository.upsert_blocks(blocks)
+
+    def set_in_trash(self, block_ids: Sequence[UUID], *, in_trash: bool) -> None:
+        """Toggle the trash flag for the supplied blocks."""
+        self._repository.set_in_trash(block_ids, in_trash=in_trash)
 
     def get_block(self, block_id: UUID, *, depth: int | None = 0) -> Block | None:
         """Fetch an individual block via the store."""
