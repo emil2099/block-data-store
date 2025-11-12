@@ -33,9 +33,7 @@ def test_markdown_round_trip_document(document_store: DocumentStore):
     document_store.save_blocks(blocks)
     document = document_store.get_root_tree(blocks[0].id, depth=None)
 
-    renderer = MarkdownRenderer(
-        resolve_reference=lambda block_id: document_store.get_block(block_id, depth=None)
-    )
+    renderer = MarkdownRenderer()
     output = renderer.render(document)
 
     assert output == source
@@ -53,22 +51,22 @@ def _assert_block_shapes(store: DocumentStore, document_id: UUID) -> None:
     heading = headings[0]
     assert heading.type is BlockType.HEADING
     assert getattr(heading.properties, "level") == 2
-    assert heading.content and heading.content.text == "Purpose"
+    assert heading.content and heading.content.plain_text == "Purpose"
 
     paragraphs = [child for child in heading.children() if child.type is BlockType.PARAGRAPH]
     assert len(paragraphs) == 1
-    assert paragraphs[0].content.text.startswith("Our mission")
+    assert paragraphs[0].content.plain_text.startswith("Our mission")
 
     bullets = [child for child in heading.children() if child.type is BlockType.BULLETED_LIST_ITEM]
     assert len(bullets) == 2
-    assert bullets[0].content.text == "Values"
+    assert bullets[0].content.plain_text == "Values"
     assert len(bullets[0].children()) == 2
-    assert bullets[0].children()[0].content.text == "Customer Obsessed"
-    assert bullets[0].children()[1].content.text == "Iterate fast"
+    assert bullets[0].children()[0].content.plain_text == "Customer Obsessed"
+    assert bullets[0].children()[1].content.plain_text == "Iterate fast"
 
     numbers = [child for child in heading.children() if child.type is BlockType.NUMBERED_LIST_ITEM]
     assert len(numbers) == 3
-    assert numbers[0].content.text == "Onboard"
-    assert numbers[1].content.text == "Deliver"
+    assert numbers[0].content.plain_text == "Onboard"
+    assert numbers[1].content.plain_text == "Deliver"
     nested_numbers = numbers[1].children()
-    assert [child.content.text for child in nested_numbers] == ["Kickoff", "Feedback"]
+    assert [child.content.plain_text for child in nested_numbers] == ["Kickoff", "Feedback"]

@@ -133,7 +133,7 @@ def ast_to_blocks(
                 BlockType.HEADING,
                 current_parent(),
                 properties={"level": level},
-                content=Content(text=text),
+                content=Content(plain_text=text),
             )
             heading_stack.append((level, heading_id))
             continue
@@ -167,7 +167,7 @@ def _append_paragraph(
         add_node(
             BlockType.PARAGRAPH,
             parent_id,
-            content=Content(text=text),
+            content=Content(plain_text=text),
         )
 
 
@@ -197,7 +197,7 @@ def _emit_list(
                 if not text:
                     continue
                 if not content_assigned:
-                    item_node["content"] = Content(text=text)
+                    item_node["content"] = Content(plain_text=text)
                     content_assigned = True
                 else:
                     _append_paragraph(add_node, item_id, {"raw": text})
@@ -224,7 +224,7 @@ def _handle_block_code(
     if info.startswith("dataset:"):
         dataset_type = info.split(":", 1)[1].strip() or "default"
         payload = _parse_dataset_payload(raw_text)
-        dataset_content = Content(text=raw_text) if raw_text else None
+        dataset_content = Content(plain_text=raw_text) if raw_text else None
         dataset_id = add_node(
             BlockType.DATASET,
             parent_id,
@@ -247,7 +247,7 @@ def _handle_block_code(
         add_node(
             BlockType.PARAGRAPH,
             parent_id,
-            content=Content(text=raw_text),
+            content=Content(plain_text=raw_text),
             metadata={"code_block": True, "info": info or None},
         )
 

@@ -83,14 +83,14 @@ def test_get_block_with_depth_prefetches_children_and_reuses_instances(repositor
                 root_id=document_id,
                 children_ids=(paragraph_id,),
                 properties={"level": 2},
-                content=Content(text="Intro"),
+                content=Content(plain_text="Intro"),
             ),
             block_factory(
                 block_id=paragraph_id,
                 block_type=BlockType.PARAGRAPH,
                 parent_id=heading_id,
                 root_id=document_id,
-                content=Content(text="Paragraph body"),
+                content=Content(plain_text="Paragraph body"),
             ),
         ]
     )
@@ -104,7 +104,7 @@ def test_get_block_with_depth_prefetches_children_and_reuses_instances(repositor
     assert first_call_section.parent() is document
 
     paragraph = first_call_section.children()[0]
-    assert paragraph.content.text == "Paragraph body"
+    assert paragraph.content.plain_text == "Paragraph body"
 
 
 def test_get_block_depth_none_materialises_full_tree(repository, block_factory):
@@ -133,7 +133,7 @@ def test_get_block_depth_none_materialises_full_tree(repository, block_factory):
                 block_type=BlockType.PARAGRAPH,
                 parent_id=heading_id,
                 root_id=document_id,
-                content=Content(text="Nested"),
+                content=Content(plain_text="Nested"),
             ),
         ]
     )
@@ -147,7 +147,7 @@ def test_get_block_depth_none_materialises_full_tree(repository, block_factory):
     paragraph = section.children()[0]
     assert paragraph is section.children()[0]
     assert paragraph.parent() is section
-    assert paragraph.content.text == "Nested"
+    assert paragraph.content.plain_text == "Nested"
 
 
 def test_set_children_reorders_and_updates_version(repository, block_factory):
@@ -636,7 +636,7 @@ def test_query_blocks_supports_nested_json_paths_and_operators(repository, block
                 content=Content(
                     data={"category": "Preventive"},
                     object={"status": "Active", "tags": ["finance", "risk"]},
-                    text="Preventive Control summary",
+                    plain_text="Preventive Control summary",
                 ),
             ),
             block_factory(
@@ -647,7 +647,7 @@ def test_query_blocks_supports_nested_json_paths_and_operators(repository, block
                 content=Content(
                     data={"category": "Detective"},
                     object={"status": "Draft", "tags": ["operations"]},
-                    text="Detective insight note",
+                    plain_text="Detective insight note",
                 ),
             ),
         ]

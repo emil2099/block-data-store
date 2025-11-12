@@ -35,12 +35,12 @@ Paragraph content lives here.
     assert document.properties.title == "Sample Document"
     assert first_heading.parent_id == document.id
     assert document.children_ids[0] == first_heading.id
-    assert first_heading.content and first_heading.content.text == "First Section"
+    assert first_heading.content and first_heading.content.plain_text == "First Section"
     assert getattr(first_heading.properties, "level") == 2
 
     list_item = next(block for block in blocks if block.type == BlockType.BULLETED_LIST_ITEM)
     assert not list_item.metadata
-    assert "Item one" in (list_item.content.text or "")
+    assert "Item one" in (list_item.content.plain_text or "")
 
     dataset_block = next(block for block in blocks if block.type == BlockType.DATASET)
     record_children = [

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence, cast
+from typing import Sequence
 from uuid import UUID
 
 from block_data_store.models.block import (
     Block,
     BlockType,
-    PageGroupBlock,
-    SyncedBlock,
 )
 from block_data_store.repositories.block_repository import BlockRepository
 from block_data_store.repositories.filters import (
@@ -23,23 +20,6 @@ from block_data_store.repositories.filters import (
 
 class DocumentStoreError(RuntimeError):
     """Raised when DocumentStore operations encounter invalid state."""
-
-
-@dataclass(frozen=True)
-class ResolvedSyncedChild:
-    """Pair a synced block with the canonical block it references."""
-
-    synced: SyncedBlock
-    target: Block
-
-
-@dataclass(frozen=True)
-class PageGroupView:
-    """Materialised view of a page group and its resolved children."""
-
-    page_group: PageGroupBlock
-    synced_children: list[SyncedBlock]
-    resolved_children: list[ResolvedSyncedChild]
 
 
 class DocumentStore:
@@ -61,43 +41,6 @@ class DocumentStore:
         if root_block.type is not BlockType.DOCUMENT:
             raise DocumentStoreError(f"Block {root_block_id} is not a document root.")
         return root_block
-
-    def get_slice(
-        self,
-        slice_id: UUID,
-        *,
-        depth: int | None = 1,
-        resolve_synced: bool = True,
-        target_depth: int | None = 1,
-    ) -> PageGroupView:
-        """Return a page-group slice along with its (optionally resolved) entries."""
-        slice_block = self._require_block(slice_id, depth=depth)
-        if slice_block.type is not BlockType.PAGE_GROUP:
-            raise DocumentStoreError(f"Block {slice_id} is not a slice (page group).")
-        page_group = cast(PageGroupBlock, slice_block)
-
-        synced_children: list[SyncedBlock] = []
-        for child_id in page_group.children_ids:
-            child_block = self._require_block(child_id)
-            if child_block.type is not BlockType.SYNCED:
-                raise DocumentStoreError(
-                    f"Slice {slice_id} has non-synced child {child_id}."
-                )
-            synced_children.append(cast(SyncedBlock, child_block))
-
-        resolved_children: list[ResolvedSyncedChild] = []
-        if resolve_synced:
-            for synced_child in synced_children:
-                target_block = self._resolve_synced_block(synced_child, depth=target_depth)
-                resolved_children.append(
-                    ResolvedSyncedChild(synced=synced_child, target=target_block)
-                )
-
-        return PageGroupView(
-        page_group=page_group,
-            synced_children=synced_children,
-            resolved_children=resolved_children,
-        )
 
     def list_documents(self, *, limit: int | None = None) -> list[Block]:
         """Return canonical documents ordered by repository defaults."""
@@ -181,31 +124,6 @@ class DocumentStore:
         return self._repository.get_block(block_id, depth=depth)
 
     # ----------------------------------------------------------------- Helpers
-    def _resolve_synced_block(
-        self,
-        synced_block: SyncedBlock,
-        *,
-        depth: int | None = 0,
-    ) -> Block:
-        target_id = self._synced_target_id(synced_block)
-        target = self._repository.get_block(target_id, depth=depth)
-        if target is None:
-            raise DocumentStoreError(
-                f"Synced block {synced_block.id} references missing block {target_id}."
-            )
-        return target
-
-    @staticmethod
-    def _synced_target_id(synced_block: SyncedBlock) -> UUID:
-        if synced_block.content and synced_block.content.synced_from:
-            return synced_block.content.synced_from
-        synced_from_prop = getattr(synced_block.properties, "synced_from", None)
-        if synced_from_prop is not None:
-            return synced_from_prop
-        raise DocumentStoreError(
-            f"Synced block {synced_block.id} does not provide a reference to canonical content."
-        )
-
     def _require_block(self, block_id: UUID, *, depth: int | None = 0) -> Block:
         block = self._repository.get_block(block_id, depth=depth)
         if block is None:
@@ -216,6 +134,4 @@ class DocumentStore:
 __all__ = [
     "DocumentStore",
     "DocumentStoreError",
-    "PageGroupView",
-    "ResolvedSyncedChild",
 ]

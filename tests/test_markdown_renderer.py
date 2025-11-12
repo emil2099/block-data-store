@@ -40,14 +40,14 @@ def test_markdown_renderer_renders_document_tree(block_factory):
         root_id=document_id,
         children_ids=(paragraph_id,),
         properties={"level": 2},
-        content=Content(text="Intro"),
+        content=Content(plain_text="Intro"),
     )
     paragraph = block_factory(
         block_id=paragraph_id,
         block_type=BlockType.PARAGRAPH,
         parent_id=heading_id,
         root_id=document_id,
-        content=Content(text="Hello world."),
+        content=Content(plain_text="Hello world."),
     )
 
     blocks = _wire([document, heading, paragraph])
@@ -60,43 +60,12 @@ def test_markdown_renderer_renders_document_tree(block_factory):
     assert "Hello world." in output
 
 
-def test_markdown_renderer_resolves_synced_blocks(block_factory):
-    target_heading_id = uuid4()
-    synced_id = uuid4()
-    page_group_id = uuid4()
-
-    target_heading = block_factory(
-        block_id=target_heading_id,
-        block_type=BlockType.HEADING,
-        parent_id=None,
-        root_id=target_heading_id,
-        properties={"level": 2},
-        content=Content(text="Controls"),
-    )
-    synced_block = block_factory(
-        block_id=synced_id,
-        block_type=BlockType.SYNCED,
-        parent_id=page_group_id,
-        root_id=target_heading_id,
-        content={"synced_from": target_heading_id},
-    )
-
-    renderer = MarkdownRenderer(
-        resolve_reference=lambda block_id: target_heading if block_id == target_heading_id else None
-    )
-
-    output = renderer.render(synced_block)
-
-    assert "Synced from" in output
-    assert "Controls" in output
-
-
 def test_markdown_renderer_includes_metadata(block_factory):
     paragraph = block_factory(
         block_type=BlockType.PARAGRAPH,
         parent_id=None,
         root_id=uuid4(),
-        content=Content(text="Body"),
+        content=Content(plain_text="Body"),
         metadata={"role": "summary", "language": "en"},
     )
 
@@ -175,14 +144,14 @@ def test_markdown_renderer_renders_lists(block_factory):
             number_three_id,
         ),
         properties={"level": 2},
-        content=Content(text="Purpose"),
+        content=Content(plain_text="Purpose"),
     )
     paragraph = block_factory(
         block_id=paragraph_id,
         block_type=BlockType.PARAGRAPH,
         parent_id=heading_id,
         root_id=doc_id,
-        content=Content(text="Our mission is to build simple data tools."),
+        content=Content(plain_text="Our mission is to build simple data tools."),
     )
     bullet_values = block_factory(
         block_id=bullet_values_id,
@@ -190,35 +159,35 @@ def test_markdown_renderer_renders_lists(block_factory):
         parent_id=heading_id,
         root_id=doc_id,
         children_ids=(bullet_nested_one_id, bullet_nested_two_id),
-        content=Content(text="Values"),
+        content=Content(plain_text="Values"),
     )
     bullet_nested_one = block_factory(
         block_id=bullet_nested_one_id,
         block_type=BlockType.BULLETED_LIST_ITEM,
         parent_id=bullet_values_id,
         root_id=doc_id,
-        content=Content(text="Customer Obsessed"),
+        content=Content(plain_text="Customer Obsessed"),
     )
     bullet_nested_two = block_factory(
         block_id=bullet_nested_two_id,
         block_type=BlockType.BULLETED_LIST_ITEM,
         parent_id=bullet_values_id,
         root_id=doc_id,
-        content=Content(text="Iterate fast"),
+        content=Content(plain_text="Iterate fast"),
     )
     bullet_transparency = block_factory(
         block_id=bullet_transparency_id,
         block_type=BlockType.BULLETED_LIST_ITEM,
         parent_id=heading_id,
         root_id=doc_id,
-        content=Content(text="Transparency"),
+        content=Content(plain_text="Transparency"),
     )
     number_one = block_factory(
         block_id=number_one_id,
         block_type=BlockType.NUMBERED_LIST_ITEM,
         parent_id=heading_id,
         root_id=doc_id,
-        content=Content(text="Onboard"),
+        content=Content(plain_text="Onboard"),
     )
     number_two = block_factory(
         block_id=number_two_id,
@@ -226,28 +195,28 @@ def test_markdown_renderer_renders_lists(block_factory):
         parent_id=heading_id,
         root_id=doc_id,
         children_ids=(number_nested_one_id, number_nested_two_id),
-        content=Content(text="Deliver"),
+        content=Content(plain_text="Deliver"),
     )
     number_nested_one = block_factory(
         block_id=number_nested_one_id,
         block_type=BlockType.NUMBERED_LIST_ITEM,
         parent_id=number_two_id,
         root_id=doc_id,
-        content=Content(text="Kickoff"),
+        content=Content(plain_text="Kickoff"),
     )
     number_nested_two = block_factory(
         block_id=number_nested_two_id,
         block_type=BlockType.NUMBERED_LIST_ITEM,
         parent_id=number_two_id,
         root_id=doc_id,
-        content=Content(text="Feedback"),
+        content=Content(plain_text="Feedback"),
     )
     number_three = block_factory(
         block_id=number_three_id,
         block_type=BlockType.NUMBERED_LIST_ITEM,
         parent_id=heading_id,
         root_id=doc_id,
-        content=Content(text="Improve"),
+        content=Content(plain_text="Improve"),
     )
 
     blocks = _wire(

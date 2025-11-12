@@ -11,7 +11,6 @@ from block_data_store.models.block import Block
 @dataclass(slots=True)
 class RenderOptions:
     recursive: bool = True
-    resolve_synced: bool = True
     include_metadata: bool = False
 
 

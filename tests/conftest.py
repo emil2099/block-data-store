@@ -104,7 +104,7 @@ def _normalise_content(content) -> Content | None:
     if isinstance(content, Content):
         return content
     if isinstance(content, str):
-        return Content(text=content)
+        return Content(plain_text=content)
     if isinstance(content, dict):
         return Content(**content)
     raise TypeError(f"Unsupported content payload: {type(content)!r}")

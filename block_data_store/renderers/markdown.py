@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
-from uuid import UUID
+from typing import Any, Mapping
 
 from block_data_store.models.block import Block, BlockType, Content
 from block_data_store.renderers.base import RenderOptions, Renderer, RendererComponent
 
-ResolveReference = Callable[[UUID], Block | None]
-
 
 @dataclass(slots=True)
 class MarkdownRenderer(Renderer):
-    resolve_reference: ResolveReference | None = None
     _components: dict[BlockType, RendererComponent] = field(default_factory=dict)
     _fallback_component: RendererComponent | None = None
 
@@ -30,7 +26,6 @@ class MarkdownRenderer(Renderer):
                 BlockType.DATASET: DatasetComponent(),
                 BlockType.RECORD: RecordComponent(),
                 BlockType.PAGE_GROUP: PageGroupComponent(),
-                BlockType.SYNCED: SyncedComponent(),
             }
         if self._fallback_component is None:
             self._fallback_component = GenericComponent()
@@ -82,7 +77,7 @@ class DocumentComponent:
     ) -> str:
         title = getattr(block.properties, "title", None)
         heading = f"# {title}" if title else f"# Document {block.id}"
-        body = block.content.text if block.content and block.content.text else ""
+        body = block.content.plain_text if block.content and block.content.plain_text else ""
         sections = [heading]
         if body:
             sections.append(body)
@@ -102,7 +97,7 @@ class HeadingComponent:
         props = block.properties
         level = getattr(props, "level", 2) if props is not None else 2
         level = max(1, min(level, 6))
-        text = block.content.text if block.content and block.content.text else f"Heading {block.id}"
+        text = block.content.plain_text if block.content and block.content.plain_text else f"Heading {block.id}"
         prefix = "#" * level
         sections = [f"{prefix} {text}"]
         sections.extend(_render_children(engine, block, options, extra))
@@ -118,7 +113,7 @@ class ParagraphComponent:
         options: RenderOptions,
         extra: Mapping[str, Any],
     ) -> str:
-        text = block.content.text if block.content and block.content.text else ""
+        text = block.content.plain_text if block.content and block.content.plain_text else ""
         sections = [text] if text else []
         sections.extend(_render_children(engine, block, options, extra))
         return _join_sections(sections)
@@ -133,13 +128,9 @@ class DatasetComponent:
         options: RenderOptions,
         extra: Mapping[str, Any],
     ) -> str:
-        dataset_type = (
-            getattr(block.properties, "category", None)
-            or getattr(block.properties, "dataset_type", None)
-            or "default"
-        )
-        if block.content and block.content.text:
-            formatted = block.content.text
+        dataset_type = getattr(block.properties, "category", None) or "default"
+        if block.content and block.content.plain_text:
+            formatted = block.content.plain_text
         else:
             records = [
                 record.content.data
@@ -196,36 +187,10 @@ class PageGroupComponent:
         extra: Mapping[str, Any],
     ) -> str:
         title = getattr(block.properties, "title", None) or f"Page Group {block.id}"
-        intro = block.content.text if block.content and block.content.text else ""
+        intro = block.content.plain_text if block.content and block.content.plain_text else ""
         sections = [f"## Page Group: {title}"]
         if intro:
             sections.append(intro)
-        sections.extend(_render_children(engine, block, options, extra))
-        return _join_sections(sections)
-
-
-class SyncedComponent:
-    def render(
-        self,
-        block: Block,
-        *,
-        engine: MarkdownRenderer,
-        options: RenderOptions,
-        extra: Mapping[str, Any],
-    ) -> str:
-        if (
-            options.resolve_synced
-            and block.content
-            and block.content.synced_from
-            and engine.resolve_reference
-        ):
-            resolved = engine.resolve_reference(block.content.synced_from)
-            if resolved is not None and resolved.id != block.id:
-                resolved_text = engine.render(resolved, options=options, **dict(extra))
-                notice = f"> Synced from {block.content.synced_from}"
-                return _join_sections([notice, resolved_text])
-        label = block.content.synced_from if block.content else None
-        sections = [f"> Unresolved synced block ({label or block.id})"]
         sections.extend(_render_children(engine, block, options, extra))
         return _join_sections(sections)
 
@@ -240,7 +205,7 @@ class GenericComponent:
         extra: Mapping[str, Any],
     ) -> str:
         label = getattr(block.properties, "title", None) or block.type.value
-        text = block.content.text if isinstance(block.content, Content) and block.content.text else ""
+        text = block.content.plain_text if isinstance(block.content, Content) and block.content.plain_text else ""
         sections = [f"### {label}"]
         if text:
             sections.append(text)
@@ -299,8 +264,8 @@ def _section_kind(line: str) -> str | None:
 
 
 def _block_text(block: Block) -> str:
-    if block.content and block.content.text:
-        return block.content.text.strip()
+    if block.content and block.content.plain_text:
+        return block.content.plain_text.strip()
     return ""
 
 

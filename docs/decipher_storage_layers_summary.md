@@ -14,7 +14,7 @@
 
 **Responsibilities:**
 - Provide intuitive application-facing methods (e.g. get subtree, insert block, move block).
-- Enforce invariants (single canonical parent, parent-owned ordering, valid synced references, version control).
+- Enforce invariants (single canonical parent, parent-owned ordering, valid group associations, version control).
 - Orchestrate multi-step operations that span multiple blocks.
 - Trigger side effects (e.g. vector index updates, cache invalidation, audit events).
 - Return hydrated models or trees directly to callers.
@@ -54,4 +54,3 @@
 
 ## 5. Guiding Rule for Engineers
 > **"If you need to work with blocks or block graphs, call the Domain Service. The Repository is internal and should not be called directly."**
-

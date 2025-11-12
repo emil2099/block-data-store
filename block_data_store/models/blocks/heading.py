@@ -11,7 +11,7 @@ from .base import Block, BlockProperties, BlockType
 
 class HeadingProps(BlockProperties):
     level: int = Field(default=2, ge=1, le=6)
-    groups: tuple[UUID, ...] = Field(default_factory=tuple)
+    groups: list[UUID] = Field(default_factory=list)
 
 
 class HeadingBlock(Block):

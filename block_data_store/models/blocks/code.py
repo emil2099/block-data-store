@@ -11,7 +11,7 @@ from .base import Block, BlockProperties, BlockType
 
 class CodeProps(BlockProperties):
     language: str | None = None
-    groups: tuple[UUID, ...] = Field(default_factory=tuple)
+    groups: list[UUID] = Field(default_factory=list)
 
 
 class CodeBlock(Block):

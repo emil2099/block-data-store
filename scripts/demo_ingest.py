@@ -36,8 +36,8 @@ def _print_tree(block, indent: int) -> None:
     prefix = " " * indent
     title = getattr(block.properties, "title", None)
     label = title or getattr(block.properties, "category", None)
-    if not label and block.content and block.content.text:
-        label = block.content.text.splitlines()[0][:60]
+    if not label and block.content and block.content.plain_text:
+        label = block.content.plain_text.splitlines()[0][:60]
     block_type = block.type.value if hasattr(block.type, "value") else str(block.type)
     print(f"{prefix}- {block_type} ({block.id})", end="")
     if label:

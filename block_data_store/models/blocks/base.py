@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class BlockType(str, Enum):
@@ -31,26 +31,14 @@ class BlockType(str, Enum):
     PAGE_GROUP = "page_group"
     CHUNK_GROUP = "chunk_group"
     UNSUPPORTED = "unsupported"
-    SYNCED = "synced"
 
 
 class Content(BaseModel):
     """Simplified multi-part content payload."""
 
-    plain_text: str | None = Field(default=None, alias="text")
+    plain_text: str | None = None
     object: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
-    synced_from: UUID | None = None
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    @property
-    def text(self) -> str | None:  # pragma: no cover - compatibility shim
-        return self.plain_text
-
-    @field_serializer("synced_from")
-    def _serialize_synced_from(self, value: UUID | None):  # pragma: no cover - trivial
-        return str(value) if value is not None else None
 
 
 class BlockProperties(BaseModel):

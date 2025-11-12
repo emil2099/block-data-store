@@ -12,7 +12,7 @@ The goal is to create a unified representation of all content, metadata, and rel
 
 - **Everything is a block:** Documents, sections, paragraphs, datasets, records, pages, and AI chunks are all blocks.
 - **Single canonical hierarchy:** Each block has exactly one canonical parent, defining structure, ordering, permissions, and provenance.
-- **Secondary non-canonical views:** Additional trees (e.g., page groups, AI chunk groups) are formed using `synced` blocks referencing canonical content.
+- **Secondary non-canonical views:** Additional trees (e.g., page groups, AI chunk groups) are materialised via grouping blocks plus `groups` metadata on canonical content—no duplicated synced nodes.
 - **Parent-owned ordering:** Ordering is stored and controlled by the parent via `children_ids`.
 - **Payload isolation:** Structural relationships and content payload are separated for clarity and performance.
 - **Typed properties, free-form metadata:** Each block subclass defines a **typed ****\`\`**** model**; `metadata` remains open (`dict[str, Any]`) for ad-hoc/AI annotations.
@@ -29,11 +29,11 @@ This schema represents the persisted fields in the database. While the logical m
 | Field              | Type        | Description                                                                            |   |       |                                                                                                 |
 | ------------------ | ----------- | -------------------------------------------------------------------------------------- | - | ----- | ----------------------------------------------------------------------------------------------- |
 | `id`               | UUID        | Unique identifier                                                                      |   |       |                                                                                                 |
-| `type`             | TEXT        | Block type (document, section, paragraph, dataset, record, page\_group, synced)        |   |       |                                                                                                 |
+| `type`             | TEXT        | Block type (document, section, paragraph, dataset, record, page\_group)        |   |       |                                                                                                 |
 | `parent_id`        | UUID        | Canonical parent (null for root)                                                       |   |       |                                                                                                 |
 | `root_id`          | UUID        | Identifier of the canonical root block (top-level document)                            |   |       |                                                                                                 |
 | `workspace_id`     | UUID        | Tenant/workspace scope                                                                 |   |       |                                                                                                 |
-| `children_ids`     | UUID[]      | Ordered list of canonical or synced children                                           |   |       |                                                                                                 |
+| `children_ids`     | UUID[]      | Ordered list of canonical children                                           |   |       |                                                                                                 |
 | `version`          | BIGINT      | Monotonic version for conflict control                                                 |   |       |                                                                                                 |
 | `created_time`     | TIMESTAMPTZ | Creation timestamp                                                                     |   |       |                                                                                                 |
 | `last_edited_time` | TIMESTAMPTZ | Modification timestamp                                                                 |   |       |                                                                                                 |
@@ -62,7 +62,7 @@ This schema represents the persisted fields in the database. While the logical m
 ### Secondary Trees (Non-canonical)
 
 - Defined using `page_group` or `chunk_group` blocks.
-- Children are `synced` blocks referencing canonical content: `content.synced_from = { block_id }`.
+- Secondary views attach through `properties.groups`; renderers/query layers collect blocks by group ID to form alternate presentations (pages, chunks, derived collections) without duplicating nodes.
 - Enables alternative views without altering canonical source of truth.
 
 ---
@@ -73,7 +73,7 @@ Rendering is handled via a **renderer layer**, not embedded in model logic.
 
 **Render Strategy Interface:**
 
-- Input: Block (or tree), with options: recursive, resolve\_synced, include\_metadata.
+- Input: Block (or tree), with options: recursive, include\_metadata.
 - Output: String or structured representation.
 - Examples:
   - `MarkdownRenderer` – generates AI-ready markdown.
@@ -131,7 +131,7 @@ Filters may be nested to support JSONB and complex metadata structures.
 
 ### 3. Document Store Layer
 
-- Orchestrates operations such as moving blocks, filtering trees, resolving synced blocks.
+- Orchestrates operations such as moving blocks, filtering trees, and wiring grouping metadata.
 - Contains business rules and validation.
 
 ### 4. Renderer Layer
@@ -271,22 +271,9 @@ class PageGroupProps(BaseModel):
 class PageGroupBlock(Block):
     type: Literal['page_group']
     properties: PageGroupProps
-
-class SyncedProps(BaseModel):
-    pass  # structural only
-
-class SyncedContent(BaseModel):
-    kind: Literal['synced_ref'] = 'synced_ref'
-    block_id: UUID
-
-class SyncedBlock(Block):
-    type: Literal['synced']
-    properties: SyncedProps = SyncedProps()
-    content: list[ContentPart] = Field(default_factory=lambda: [])
-    # synced reference lives in metadata or as a special part
 ```
 
-**Note:** For synced references, you may either (a) store `synced_from` in `metadata`, or (b) add a `SyncedRef` part to `content`. Choose one strategy consistently; (a) keeps `content` for renderable payloads, (b) keeps all references in `content`.
+**Note:** Secondary views are now constructed via grouping blocks (`group_index`, `page_group`, `chunk_group`) combined with the `groups` property on content blocks—no separate synced blocks are required.
 
 ## A.6 Discriminated Union
 
@@ -294,7 +281,7 @@ Expose a single union for parsing and type hints:
 
 ```python
 AnyBlock = Annotated[
-    Union[DocumentBlock, SectionBlock, ParagraphBlock, PageGroupBlock, SyncedBlock],
+    Union[DocumentBlock, SectionBlock, ParagraphBlock, PageGroupBlock],
     Field(discriminator='type')
 ]
 ```
@@ -304,7 +291,6 @@ AnyBlock = Annotated[
 - Exactly one canonical parent (root excluded).
 - Parent-owned ordering via `children_ids`.
 - `root_id` is the canonical owner document.
-- Synced blocks must reference valid canonical blocks.
 - `properties` and `content` are **typed** in code; persisted as JSON.
 
 ## A.8 Extensibility
@@ -341,7 +327,7 @@ Each call maintains an in-memory cache (`dict[UUID → Block]`) for resolving ch
 ## B.4 Example Interface
 
 ```python
-def get_block(id: UUID, *, depth: int | None = 0, resolve_synced: bool = False) -> AnyBlock:
+def get_block(id: UUID, *, depth: int | None = 0) -> AnyBlock:
     """Retrieve a block with optional subtree hydration."""
 
 
@@ -466,13 +452,13 @@ Rendering is separated from the data model to allow different consumers (AI, UI,
 
 - Blocks are pure data objects.
 - Renderer is a pluggable strategy.
-- Rendering may include or exclude metadata, resolve synced references, and recurse the tree.
+- Rendering may include or exclude metadata and recurse the tree.
 
 ## D.3 Renderer Interface (Illustrative, not final)
 
 ```python
 class Renderer(Protocol):
-    def render(self, block: AnyBlock, *, recursive: bool = True, resolve_synced: bool = True, include_metadata: bool = False) -> str:
+    def render(self, block: AnyBlock, *, recursive: bool = True, include_metadata: bool = False) -> str:
         ...
 ```
 
@@ -482,14 +468,7 @@ class Renderer(Protocol):
 - `HtmlRenderer`: UI-focused
 - Future: JSON-LD or GraphQL representation
 
-## D.5 Synced Block Resolution
-
-Synced blocks may either:
-
-1. Resolve automatically to underlying canonical content during render, or
-2. Render as references depending on consumer context.
-
-## D.6 Future Work
+## D.5 Future Work
 
 - Styling and theming
 - Render performance optimisations
@@ -558,4 +537,3 @@ Synced blocks may either:
 - Governance of schema evolution.
 - Caching and replication layers.
 - API stability over time.
-

@@ -10,7 +10,7 @@ from .base import Block, BlockProperties, BlockType
 
 
 class ParagraphProps(BlockProperties):
-    groups: tuple[UUID, ...] = Field(default_factory=tuple)
+    groups: list[UUID] = Field(default_factory=list)
 
 
 class ParagraphBlock(Block):

@@ -117,7 +117,7 @@ store.save_blocks([updated_block])
 PREVIEW_TEXT = """
 **Renderer preview (block-level)**
 
-- Uses the Markdown renderer with toggles for metadata and synced resolution.
+- Uses the Markdown renderer with optional metadata output.
 - The focused block preview respects the recursive toggle, so you can inspect a
   single node or its full subtree.
 """
@@ -178,7 +178,6 @@ class AppState:
     markdown_view: Any | None = None
     document_markdown_view: Any | None = None
     include_metadata_checkbox: Any | None = None
-    resolve_synced_checkbox: Any | None = None
     include_children_checkbox: Any | None = None
     render_block_children: bool = True
 
@@ -199,8 +198,8 @@ def _block_label(block: Block) -> str:
             return f"{block.type.value}: {title}"
 
     if block.content:
-        if block.content.text:
-            summary = block.content.text.strip().splitlines()[0][:40]
+        if block.content.plain_text:
+            summary = block.content.plain_text.strip().splitlines()[0][:40]
             if summary:
                 return f"{block.type.value}: {summary}"
         data = block.content.data
@@ -274,7 +273,7 @@ def _bootstrap_state() -> AppState:
     create_all(engine)
     session_factory = create_session_factory(engine)
     store = create_document_store(session_factory)
-    renderer = MarkdownRenderer(resolve_reference=lambda ref: store.get_block(ref, depth=1) if ref else None)
+    renderer = MarkdownRenderer()
     state = AppState(store=store, renderer=renderer)
     _seed_documents(state)
     return state
@@ -311,11 +310,9 @@ def _render_block(state: AppState, block: Block) -> None:
     if state.markdown_view is None:
         return
     include_metadata = bool(state.include_metadata_checkbox.value) if state.include_metadata_checkbox else False
-    resolve_synced = bool(state.resolve_synced_checkbox.value) if state.resolve_synced_checkbox else True
     recursive = state.render_block_children
     options = RenderOptions(
         include_metadata=include_metadata,
-        resolve_synced=resolve_synced,
         recursive=recursive,
     )
     rendered = state.renderer.render(block, options=options)
@@ -327,8 +324,7 @@ def _render_document_markdown(state: AppState, document_block: Block | None = No
         return
 
     include_metadata = bool(state.include_metadata_checkbox.value) if state.include_metadata_checkbox else False
-    resolve_synced = bool(state.resolve_synced_checkbox.value) if state.resolve_synced_checkbox else True
-    options = RenderOptions(include_metadata=include_metadata, resolve_synced=resolve_synced)
+    options = RenderOptions(include_metadata=include_metadata)
 
     if document_block is None:
         document_id = state.selected_document_id
@@ -892,11 +888,6 @@ def _build_preview_section(state: AppState) -> None:
             state.include_metadata_checkbox = ui.checkbox(
                 "Include metadata",
                 value=False,
-                on_change=_rerender_on_toggle(state),
-            )
-            state.resolve_synced_checkbox = ui.checkbox(
-                "Resolve synced content",
-                value=True,
                 on_change=_rerender_on_toggle(state),
             )
             state.include_children_checkbox = ui.checkbox(

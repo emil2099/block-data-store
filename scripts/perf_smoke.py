@@ -183,7 +183,7 @@ def main() -> None:
     ensure_schema(engine, args.reset_schema)
     session_factory = create_session_factory(engine)
     store = create_document_store(session_factory)
-    renderer = MarkdownRenderer(resolve_reference=lambda ref: store.get_block(ref, depth=1) if ref else None)
+    renderer = MarkdownRenderer()
 
     document_path = args.document.resolve()
     document_text = document_path.read_text(encoding="utf-8")

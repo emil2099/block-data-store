@@ -25,7 +25,6 @@ from .page_group import PageGroupBlock, PageGroupProps
 from .paragraph import ParagraphBlock, ParagraphProps
 from .quote import QuoteBlock, QuoteProps
 from .record import RecordBlock, RecordProps
-from .synced import SyncedBlock, SyncedProps
 from .table import TableBlock, TableProps
 from .unsupported import UnsupportedBlock, UnsupportedProps
 from .workspace import WorkspaceBlock, WorkspaceProps
@@ -51,7 +50,6 @@ AnyBlock = Annotated[
         PageGroupBlock,
         ChunkGroupBlock,
         UnsupportedBlock,
-        SyncedBlock,
     ],
     Field(discriminator="type"),
 ]
@@ -76,7 +74,6 @@ BLOCK_CLASS_MAP = {
     BlockType.PAGE_GROUP: PageGroupBlock,
     BlockType.CHUNK_GROUP: ChunkGroupBlock,
     BlockType.UNSUPPORTED: UnsupportedBlock,
-    BlockType.SYNCED: SyncedBlock,
 }
 
 PROPERTIES_CLASS_MAP = {
@@ -99,7 +96,6 @@ PROPERTIES_CLASS_MAP = {
     BlockType.PAGE_GROUP: PageGroupProps,
     BlockType.CHUNK_GROUP: ChunkGroupProps,
     BlockType.UNSUPPORTED: UnsupportedProps,
-    BlockType.SYNCED: SyncedProps,
 }
 
 
@@ -156,8 +152,6 @@ __all__ = [
     "ChunkGroupProps",
     "UnsupportedBlock",
     "UnsupportedProps",
-    "SyncedBlock",
-    "SyncedProps",
     "block_class_for",
     "properties_model_for",
 ]
