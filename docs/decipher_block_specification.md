@@ -62,13 +62,13 @@ All keys within the content object are **optional**. A block may contain one 
 This section serves as a living list of architectural questions and trade-offs that need to be explicitly addressed and decided upon as this specification evolves.
 
 - How is deletion handled? Do we use the in_trash flag, and what is the process for permanent deletion? 
-**Status:** **Resolved** - see discussion in section 11.1.
+**Status:** **Resolved** - see discussion in section 12.1.
 - How are AI-generated outputs (e.g., extractions, summaries) treated? Do we add a source flag within metadata?
-**Status:** **Resolved** - see discussion in section 11.2.
+**Status:** **Resolved** - see discussion in section 12.2.
 - How are external source document references treated (e.g., a reference to "Section 1.3.5" in a regulation)?
-**Status:** **Resolved** - see discussion in section 11.3.
+**Status:** **Resolved** - see discussion in section 12.3.
 - Notion's architecture highlights that blocks can be converted from one type to another without losing history. How can we support this?
-**Status:** **Resolved** - see discussion in section 11.4.
+**Status:** **Resolved** - see discussion in section 12.4.
 - How should rich text or inline elements (like mentions or links) be handled within the content model? Should this be part of plain_text using a format like Markdown, or within the object representation? Should we consider a hybrid using in-line Markdown blocks without clashing with block-level structures?
 **Status:** **Deferred** - initial implementation to have no inline complexity (assume plain_text as default), review at a later stage.
 - How Schema is defined and interacts with DataRecord
@@ -549,7 +549,30 @@ This is a structural block and does not contain any content.
 
 - This block is not rendered directly. It is used to query and assemble the content blocks that form a specific chunk for an AI model.
 
-## 10. Future Considerations: Deferred Block Types
+## 10. System Blocks
+
+### UnsupportedBlock
+
+- **Type:** unsupported
+- **Purpose:** A minimal block type used by ingestion systems to store raw content that is malformed, unrecognised, or cannot be mapped to any other semantic block type.
+
+**Typed Properties (properties)**
+
+This block has no specific typed properties. It simply inherits from Base Block.
+
+**Content Usage**
+
+| **Key** | **Usage** |
+| --- | --- |
+| plain_text | *Optional.* Used to store the raw, unparsed string content of the unsupported element. |
+| object | *Optional.* Used to store any partially-parsed or structured data from the unsupported element. |
+| data | *Not used.* |
+
+**Renderer Behavior**
+
+- A renderer should display a simple, non-intrusive placeholder (e.g., [unsupported content]) or render nothing. This ensures the block is noted without breaking the flow of the document.
+
+## 11. Future Considerations: Deferred Block Types
 
 To maintain a lean and focused initial implementation, a number of block types have been explicitly deferred. The core architecture is designed to be extensible, and the following blocks represent logical next steps that can be added in the future without requiring fundamental changes to the base model.
 
@@ -562,9 +585,9 @@ To maintain a lean and focused initial implementation, a number of block types h
 | WebLinkBlock | For displaying a rich, visually appealing preview of an external URL. This would require a backend service to fetch metadata (like the title, description, and preview image) from the linked page and display it in a structured card format. |
 | TodoBlock | An interactive block representing a single task or to-do item. It would function like a list item but include a checkbox, requiring a stateful property (e.g., checked: boolean) to track its completion status. |
 
-## 11. Final Design Decisions and Next Steps
+## 12. Final Design Decisions and Next Steps
 
-### 11.1. Handling Deletion
+### 12.1. Handling Deletion
 
 The system will adopt a hierarchical, non-cascading soft-delete model. This approach is chosen to ensure that user-facing delete and restore operations are instantaneous, while centralizing the complexity of hierarchical state within the data-retrieval layer.
 
@@ -602,7 +625,7 @@ To manage initial complexity while building on a correct technical foundation, t
     - The "Restore" functionality, which sets the in_trash flag back to FALSE.
     - A background job for handling permanent deletion and cleaning up any dangling references that result from it.
 
-### 11.2. Handling AI-Generated Content
+### 12.2. Handling AI-Generated Content
 
 The block model is designed to support a range of AI-generated outputs by treating them as first-class citizens within the system. The specific implementation depends on the nature and lifecycle of the output. The three primary scenarios are:
 
@@ -624,7 +647,7 @@ The block model is designed to support a range of AI-generated outputs by treati
 - **Scenario:** An AI process generates a full, multi-part document from a prompt or source materials.
 - **Decision:** The AI agent will act as a standard author. It will create a new **DocumentBlock** and populate it with a tree of standard content blocks (HeadingBlock, ParagraphBlock, etc.). To ensure traceability, identifying information (e.g., the model version, source prompt) will be stored in the **metadata** field of the root DocumentBlock.
 
-### 11.3. Handling Source Document Numbering and References
+### 12.3. Handling Source Document Numbering and References
 
 To capture source document references (e.g., a paragraph labeled "13.9.6" or a heading titled "Section 1.3.5 Data Encryption"), the system will adopt a two-part strategy that prioritises textual integrity while allowing for optional machine-readable data.
 
@@ -633,7 +656,7 @@ To capture source document references (e.g., a paragraph labeled "13.9.6" or a h
 
 This approach will still be compatible for constructing a bread-crumb, in the same way as Notion displays a document’s TOCs by traversing the node structure based on headings.
 
-### 11.4. Supporting Block Type Conversion
+### 12.4. Supporting Block Type Conversion
 
 To allow users to convert blocks from one type to another (e.g., a Heading to a Paragraph) without losing historical property data, the system will adopt a **Unified Properties Model**. This approach prioritizes data fidelity and minimal conversion logic.
 

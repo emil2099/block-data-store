@@ -57,6 +57,10 @@ Non-Core Modules
 
 Refer to provided documentation regularly to ensure we stay on track, and call out if we start deviating from them so we can confirm there are good reasons for it.
 
+We don't care about sticking to the design 1-2-1 if there are good reasons to evolve it.
+
+We don't care about backward compatibility - this is a new library so things can and should evolve rapidly if the changes are justified and bring overall clarity!
+
 ### When Uncertain
 
 - **Check online sources** for inspiration or verification rather than guessing
