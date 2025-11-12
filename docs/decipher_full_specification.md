@@ -1,539 +1,108 @@
 # Decipher AI – Core Data Model and Architecture Specification
 
-## 1. Purpose and Vision
-
-This document defines the canonical data model and architecture underpinning Decipher AI. It establishes the foundation for a flexible, block-based system capable of supporting multi-format content, AI workflows, compliance analytics, and knowledge graph functionality, while maintaining strong guarantees for structure, extensibility, and performance.
-
-The goal is to create a unified representation of all content, metadata, and relationships while enabling multiple independent views and AI-native processing.
-
----
-
-## 2. Core Design Principles
-
-- **Everything is a block:** Documents, sections, paragraphs, datasets, records, pages, and AI chunks are all blocks.
-- **Single canonical hierarchy:** Each block has exactly one canonical parent, defining structure, ordering, permissions, and provenance.
-- **Secondary non-canonical views:** Additional trees (e.g., page groups, AI chunk groups) are materialised via grouping blocks plus `groups` metadata on canonical content—no duplicated synced nodes.
-- **Parent-owned ordering:** Ordering is stored and controlled by the parent via `children_ids`.
-- **Payload isolation:** Structural relationships and content payload are separated for clarity and performance.
-- **Typed properties, free-form metadata:** Each block subclass defines a **typed ****\`\`**** model**; `metadata` remains open (`dict[str, Any]`) for ad-hoc/AI annotations.
-- **Structured, multi-part content:** Blocks carry a \*\*typed \*\*\`\` as a list of content parts (e.g., `text`, `data`, `object`, `blob/url`), enabling multiple payloads per block while persisting as JSON.
-- **Renderer layer abstraction:** Blocks are pure data. Rendering (Markdown, HTML, AI context) is handled by pluggable renderer strategies.
-- **AI-native by design:** Standardised representations (controlled recursively, by metadata flags) allow AI tools to consume any block.
-
----
-
-## 3. Block Schema
-
-This schema represents the persisted fields in the database. While the logical model is stable, certain implementation details (such as content encoding and indexing strategy) may evolve as the system matures.
-
-| Field              | Type        | Description                                                                            |   |       |                                                                                                 |
-| ------------------ | ----------- | -------------------------------------------------------------------------------------- | - | ----- | ----------------------------------------------------------------------------------------------- |
-| `id`               | UUID        | Unique identifier                                                                      |   |       |                                                                                                 |
-| `type`             | TEXT        | Block type (document, section, paragraph, dataset, record, page\_group)        |   |       |                                                                                                 |
-| `parent_id`        | UUID        | Canonical parent (null for root)                                                       |   |       |                                                                                                 |
-| `root_id`          | UUID        | Identifier of the canonical root block (top-level document)                            |   |       |                                                                                                 |
-| `workspace_id`     | UUID        | Tenant/workspace scope                                                                 |   |       |                                                                                                 |
-| `children_ids`     | UUID[]      | Ordered list of canonical children                                           |   |       |                                                                                                 |
-| `version`          | BIGINT      | Monotonic version for conflict control                                                 |   |       |                                                                                                 |
-| `created_time`     | TIMESTAMPTZ | Creation timestamp                                                                     |   |       |                                                                                                 |
-| `last_edited_time` | TIMESTAMPTZ | Modification timestamp                                                                 |   |       |                                                                                                 |
-| `created_by`       | UUID        | Creator id                                                                             |   |       |                                                                                                 |
-| `last_edited_by`   | UUID        | Editor id                                                                              |   |       |                                                                                                 |
-| `properties`       | JSONB       | Persisted JSON of a typed per-subclass properties model (validated in Model layer)     |   |       |                                                                                                 |
-| `metadata`         | JSONB       | Free-form annotations for AI or system use                                             |   |       |                                                                                                 |
-| `content`          | JSONB       | Persisted JSON representing a list of content parts, supporting multiple payload types |   | JSONB | **Persisted JSON** of a **typed multi-part content model** (supports text/data/object/blob/url) |
-
-
-
----
-
-## 4. Hierarchical Structure
-
-### Canonical Tree (Primary)
-
-```
-[document]
-  ├─ [section]
-  │    └─ [paragraph]
-  └─ [section]
-       └─ [paragraph]
-```
-
-### Secondary Trees (Non-canonical)
-
-- Defined using `page_group` or `chunk_group` blocks.
-- Secondary views attach through `properties.groups`; renderers/query layers collect blocks by group ID to form alternate presentations (pages, chunks, derived collections) without duplicating nodes.
-- Enables alternative views without altering canonical source of truth.
-
----
-
-## 5. Rendering Model
-
-Rendering is handled via a **renderer layer**, not embedded in model logic.
-
-**Render Strategy Interface:**
-
-- Input: Block (or tree), with options: recursive, include\_metadata.
-- Output: String or structured representation.
-- Examples:
-  - `MarkdownRenderer` – generates AI-ready markdown.
-  - `HtmlRenderer` – UI display.
-  - Future: JSON-LD for graph export.
-
-This approach mirrors Notion’s architecture: blocks represent structure, clients handle presentation.
-
----
-
-## 6. Filtering and Query Model
-
-Filtering supports analytical use cases across structure and metadata.
-
-### Structural Filtering (`where`)
-
-Filters on block-level attributes:
-
-```json
-{"where": {"type": "record", "root_id": "..."}}
-```
-
-### Semantic Filtering (`filter`)
-
-Filters on JSON properties:
-
-```json
-{"filter": {"property": "category", "select": {"equals": "Preventive"}}}
-```
-
-### Combined
-
-```json
-{  "where": {"type": "record"},  "filter": {"category": "Preventive"} }
-```
-
-Filters may be nested to support JSONB and complex metadata structures.
-
----
-
-## 7. Architecture Layers
-
-### 1. Model Layer (Pydantic)
-
-- Immutable blocks with ID references only.
-- Private resolvers injected at runtime for navigation.
-- Subclasses defined via discriminated unions.
-
-### 2. Repository Layer (SQLAlchemy)
-
-- Handles persistence.
-- Single source of truth for read/write logic.
-- Supports PostgreSQL and SQLite via unified interface.
-- Implements `get_block`, `set_children`, `query_blocks` with depth control and version safety.
-
-### 3. Document Store Layer
-
-- Orchestrates operations such as moving blocks, filtering trees, and wiring grouping metadata.
-- Contains business rules and validation.
-
-### 4. Renderer Layer
-
-- Separately implemented rendering strategies.
-- Enables distinct outputs for AI, UI, export.
-
----
-
-## 8. Future Extensions
-
-- Relationships as first-class objects (cross-document mapping).
-- Version history and time travel.
-- Vector embeddings.
-- Real-time collaboration and conflict resolution.
-
----
-
-## 9. Key Benefits
-
-- Scalable, flexible representation for AI workflows.
-- Separation of core data model from presentation.
-- Enables granular editing, retrieval, and filtering.
-- Supports complex analytical use cases across documents.
-
----
-
-## 10. Next Steps
-
-- Finalise block subclasses.
-- Implement core layers.
-- Build initial ingestion and rendering pipeline.
-- Execute POC to validate all assumptions.
-
----
-
-# Appendix A: Block Subclass Definitions
-
-## A.1 Overview
-
-Blocks are immutable Pydantic models. Each specific block type declares \*\*typed \*\*` and **typed \*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\***`, while `metadata` remains free-form. Persistence stores `properties`/`content` as JSON; validation happens in the Model layer. Subclasses are discriminated by the `type` field.
-
-## A.2 Typed Content Model (multi-part)
-
-Blocks may contain multiple content payloads simultaneously (e.g., text + data). We model this as a list of discriminated content parts.
-
-```python
-class TextPart(BaseModel):
-    kind: Literal['text']
-    text: str
-
-class DataPart(BaseModel):
-    kind: Literal['data']
-    data: dict[str, Any]
-
-class ObjectPart(BaseModel):
-    kind: Literal['object']
-    object: dict[str, Any]
-
-class BlobPart(BaseModel):
-    kind: Literal['blob', 'url']
-    url: AnyUrl | None = None
-    media_type: str | None = None  # e.g., 'image/png', 'application/pdf'
-
-ContentPart = Annotated[Union[TextPart, DataPart, ObjectPart, BlobPart], Field(discriminator='kind')]
-```
-
-Each block’s `content` is `list[ContentPart] = []` (empty for structural-only blocks).
-
-## A.3 Typed Properties per Subclass
-
-Properties are schemaful per block subtype. Versions can be tracked with an optional `properties_version: int`.
-
-```python
-class DocumentProps(BaseModel):
-    title: str
-    status: Literal['draft','final'] | None = None
-
-class SectionProps(BaseModel):
-    title: str
-    anchor: str | None = None  # for stable links
-
-class ParagraphProps(BaseModel):
-    role: Literal['body','note','quote'] | None = None
-```
-
-## A.4 Base Block Model
-
-```python
-class Block(BaseModel):
-    id: UUID
-    type: str
-    parent_id: UUID | None
-    root_id: UUID
-    workspace_id: UUID
-    children_ids: tuple[UUID, ...] = ()
-    version: int
-    created_time: datetime
-    last_edited_time: datetime
-    created_by: UUID
-    last_edited_by: UUID
-    properties: Any  # typed in subclasses
-    metadata: dict[str, Any] = {}
-    content: list[ContentPart] = []
-    properties_version: int | None = None
-
-    _resolve_one: Callable[[UUID | None], 'Block | None'] = PrivateAttr(default=lambda _id: None)
-    _resolve_many: Callable[[Iterable[UUID]], list['Block']] = PrivateAttr(default=lambda ids: [])
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    def parent(self) -> 'Block | None':
-        return self._resolve_one(self.parent_id) if self.parent_id else None
-
-    def children(self) -> list['Block']:
-        return self._resolve_many(self.children_ids)
-```
-
-## A.5 Subclasses
-
-```python
-class DocumentBlock(Block):
-    type: Literal['document']
-    properties: DocumentProps
-
-class SectionBlock(Block):
-    type: Literal['section']
-    properties: SectionProps
-
-class ParagraphBlock(Block):
-    type: Literal['paragraph']
-    properties: ParagraphProps
-
-class PageGroupProps(BaseModel):
-    title: str | None = None
-
-class PageGroupBlock(Block):
-    type: Literal['page_group']
-    properties: PageGroupProps
-```
-
-**Note:** Secondary views are now constructed via grouping blocks (`group_index`, `page_group`, `chunk_group`) combined with the `groups` property on content blocks—no separate synced blocks are required.
-
-## A.6 Discriminated Union
-
-Expose a single union for parsing and type hints:
-
-```python
-AnyBlock = Annotated[
-    Union[DocumentBlock, SectionBlock, ParagraphBlock, PageGroupBlock],
-    Field(discriminator='type')
-]
-```
-
-## A.7 Invariants
-
-- Exactly one canonical parent (root excluded).
-- Parent-owned ordering via `children_ids`.
-- `root_id` is the canonical owner document.
-- `properties` and `content` are **typed** in code; persisted as JSON.
-
-## A.8 Extensibility
-
-- New block types introduced by adding new `*Props` and optional content parts.
-- No DB schema changes required.
-- Renderer Layer consumes typed models and may ignore unknown content parts.
-
----
-
-# Appendix B: Repository and Hydration Strategy
-
-## B.1 Purpose and Scope
-
-The repository layer abstracts persistence logic. It provides a consistent API for interacting with SQLite and Postgres without exposing ORM models to higher layers. This is **not final** and is expected to evolve as performance and complexity considerations increase.
-
-## B.2 Responsibilities
-
-- Persist and retrieve blocks.
-- Perform depth-controlled hydration (0, 1, or full tree).
-- Inject resolver functions for navigation in Pydantic models.
-- Enforce optimistic concurrency via version checks.
-- Support structural writes via `set_children`.
-- Support structured filtering APIs.
-
-## B.3 Depth-Controlled Hydration
-
-- **depth=0:** return the block only; children resolved on-demand (lazy).
-- **depth=1:** pre-load children; grandchildren loaded lazily.
-- **depth=None / 'all':** pre-load full tree.
-
-Each call maintains an in-memory cache (`dict[UUID → Block]`) for resolving children and parents efficiently.
-
-## B.4 Example Interface
-
-```python
-def get_block(id: UUID, *, depth: int | None = 0) -> AnyBlock:
-    """Retrieve a block with optional subtree hydration."""
-
-
-def set_children(parent_id: UUID, children_ids: Sequence[UUID], *, expected_version: int) -> None:
-    """Update parent-owned ordering and increment version."""
-
-
-def query_blocks(where: dict, filter: dict | None = None) -> list[AnyBlock]:
-    """Return blocks filtered by structure and properties."""
-```
-
-## B.5 Optimistic Concurrency
-
-Writes require passing the current version. If the stored version does not match, the write is rejected.
-
-## B.6 Backend Compatibility
-
-- SQLite uses JSON1 functions; Postgres uses JSONB operators.
-- Filtering logic will be abstracted behind the repository.
-
-## B.7 Future Considerations (Non-final)
-
-- Indexing strategies.
-- Batch hydration.
-- Caching layers.
-
----
-
-# Appendix C: Filtering Model Extensions
-
-## C.1 Purpose
-
-Filtering is central to analytical use cases. It must support structural querying (tree position) and semantic querying (properties and metadata). This model will evolve with POC learnings and performance constraints.
-
-## C.2 Structural Filter (`where`)
-
-Examples:
-
-```json
-{"where": {"type": "record", "root_id": "..."}}
-{"where": {"parent_id": "..."}}
-```
-
-## C.3 Property Filter (`filter`)
-
-Supports nested property access via dotted paths or JSON operators.
-
-```json
-{"filter": {"property": "category", "equals": "Preventive"}}
-```
-
-### Nested example:
-
-```json
-{"filter": {"property": "attributes.subtype", "equals": "financial"}}
-```
-
-## C.4 Combined Query
-
-```json
-{
-  "where": {"type": "record", "root_id": "abc"},
-  "filter": {"property": "category", "equals": "Preventive"}
-}
-```
-
-## C.5 Logical Operators (AND / OR)
-
-The filtering model supports compound logical expressions using `and` / `or` keys:
-
-### AND example:
-
-```json
-{
-  "filter": {
-    "and": [
-      {"property": "category", "equals": "Preventive"},
-      {"property": "status", "equals": "Active"}
-    ]
-  }
-}
-```
-
-### OR example:
-
-```json
-{
-  "filter": {
-    "or": [
-      {"property": "risk_level", "equals": "High"},
-      {"property": "risk_level", "equals": "Critical"}
-    ]
-  }
-}
-```
-
-Nested logic is also supported:
-
-```json
-{
-  "filter": {
-    "and": [
-      {"property": "category", "equals": "Preventive"},
-      {"or": [
-        {"property": "status", "equals": "Active"},
-        {"property": "status", "equals": "Draft"}
-      ]}
-    ]
-  }
-}
-```
-
----
-
-# Appendix D: Renderer Architecture
-
-## D.1 Purpose
-
-Rendering is separated from the data model to allow different consumers (AI, UI, export tools) to generate appropriate views of the same blocks.
-
-## D.2 Design Principles
-
-- Blocks are pure data objects.
-- Renderer is a pluggable strategy.
-- Rendering may include or exclude metadata and recurse the tree.
-
-## D.3 Renderer Interface (Illustrative, not final)
-
-```python
-class Renderer(Protocol):
-    def render(self, block: AnyBlock, *, recursive: bool = True, include_metadata: bool = False) -> str:
-        ...
-```
-
-## D.4 Example Renderer Types
-
-- `MarkdownRenderer`: AI and export-friendly
-- `HtmlRenderer`: UI-focused
-- Future: JSON-LD or GraphQL representation
-
-## D.5 Future Work
-
-- Styling and theming
-- Render performance optimisations
-- Support for multimodal content (images, tables, charts)
-
----
-
-*Note: These appendices are intentionally living documents and designed to evolve with implementation insights.*
-
-# Appendix E: Motivation and Comparison to Notion
-
-## E.1 Why a Block-Based Model
-
-- Existing document platforms are page-centric and not optimised for analytical or AI use cases.
-- Decipher requires a model that supports deep semantic understanding, structured extraction, and flexible representation.
-- Blocks provide atomicity, enabling granular storage, retrieval, and modification without loading entire documents.
-
-## E.2 Inspired by Notion, Extended for AI
-
-| Aspect     | Notion           | Decipher                    |
-| ---------- | ---------------- | --------------------------- |
-| Core unit  | Block            | Block                       |
-| Hierarchy  | Single canonical | Canonical + secondary trees |
-| Data model | UX-first         | AI-first & analytics-first  |
-| Rendering  | Client-side      | Pluggable Renderer Layer    |
-| AI tooling | Limited          | Native integration          |
-| Properties | Mostly flat      | Typed + extensible          |
-| Content    | Single payload   | Multi-part payload          |
-
-## E.3 Key Differences
-
-- Decipher introduces explicit **typed properties** and **multi-part content**.
-- Decipher treats **secondary groupings** as first-class citizens.
-- Rendering is abstracted for AI and downstream automation.
-- The model is designed to support compliance obligations and knowledge graphs.
-
-## E.4 Strategic Motivation
-
-- Break content free from document silos.
-- Enable consistent ingestion, filtering, analysis, and automated reasoning.
-
----
-
-# Appendix F: Risks and Limitations
-
-## F.1 Known Risks
-
-- **Query Complexity:** JSONB and nested property filters may impact performance.
-- **Secondary Trees:** Introducing multiple hierarchies adds cognitive and technical complexity.
-- **Typed Properties Evolution:** Requires versioning strategy.
-- **Dual Database Support:** SQLite and Postgres parity must be actively maintained.
-
-## F.2 Implementation Risks
-
-- Complexity may exceed delivery capacity.
-- Performance tuning may require caching and indexing layers not included in initial versions.
-
-## F.3 Mitigations
-
-- Start with minimal POC and measure performance.
-- Incrementally introduce features.
-- Separate core logic from display/AI concerns to maintain flexibility.
-
-## F.4 Future Considerations
-
-- Governance of schema evolution.
-- Caching and replication layers.
-- API stability over time.
+## Purpose & Vision
+This document captures the foundational intent behind Decipher’s block-based content platform—to unify every piece of structured information into a single, AI-native fabric—while preserving clarity about why the system exists and how the major layers collaborate. Individual concerns (block schema, renderers, storage, grouping) have their own focused documents so they can evolve independently, but this spec should help readers understand the story before diving into the details.
+
+## Who This Is For
+- Product and architecture stakeholders who need the “why” and the big picture.
+- Engineers who want guardrails, invariants, and a reliable mental model before reading implementation details.
+- Contributors creating parsers, renderers, or storage adapters that must align with the canonical model.
+
+## How To Read This
+- Skim Purpose, Principles, and the End-to-End Example to build intuition.
+- Use Block Model Summary, Hierarchy & Grouping, and Filtering sections as your day‑to‑day reference for invariants and data flow.
+- Jump to companion docs when you need specifics:
+  - Canonical schema and block types → `docs/decipher_block_specification.md`
+  - Grouping model (pages/chunks) → `docs/decipher_block_grouping_model.md`
+  - Renderer architecture → `docs/decipher_renderer_architecture.md`
+  - Storage responsibilities → `docs/decipher_storage_layers_summary.md`
+
+## Non‑Goals (What This Document Does Not Do)
+- Define every field of every block type (that lives in Block Specification).
+- Prescribe a single renderer or UI framework.
+- Lock us to a specific database engine, indexing strategy, or deployment topology.
+
+## Vision & Motivation
+- **Unify every representation of content** (documents, datasets, annotations, derived views) into one typed block hierarchy so AI and analytical workflows can reason over it uniformly.
+- **Stabilize the core model**: the canonical tree, typed blocks, and decoupled renderers make it safe to extend ingestion paths, groupings, and tooling without bending the schema.
+- **Orient readers quickly**: describe the “why” and the high-level interactions so newcomers can find the right companion doc (`docs/decipher_block_specification.md`, `docs/decipher_renderer_architecture.md`, etc.) for implementation details.
+
+## Core Design Principles
+- **Everything is a block:** documents, sections, paragraphs, records, groups, and derived artifacts all share the same envelope.
+- **Single canonical hierarchy:** each block has exactly one parent; ordering is owned by that parent via `children_ids`, ensuring deterministic structure, permissions, and provenance.
+- **Secondary views via tagging:** page/chunk/group blocks live alongside the canonical tree; canonical blocks simply tag their `properties.groups` to participate in alternate traversals.
+- **Payload isolation:** relationships, schemaful `properties`, free-form metadata, and multi-part `content` are each stored separately so renderers, indexers, and analytics can pick what they need.
+- **Renderer layer abstraction:** blocks stay pure data while separate renderer strategies (Markdown, HTML, AI contexts, etc.) consume hydrated trees.
+
+## End‑to‑End Example (From PDF Page To AI Chunk)
+- Parser ingests a PDF and emits a canonical tree (document → sections → paragraphs/lists) plus `page_group` blocks ordered under a `page_group_index`.
+- Canonical content blocks set `properties.groups = [page-uuid,...]` for each page they appear on (split paragraphs can reference multiple pages).
+- Document Store persists the graph through the Domain Service, which enforces single-parent and parent-owned ordering invariants.
+- A chunking job creates `chunk_group` blocks and tags participating canonical blocks via `properties.groups`. No nodes are duplicated.
+- Renderer asks for “Chunk 12” → repository fetches blocks tagged with that group → result is sorted by canonical order → renderer walks the hydrated tree to produce Markdown/HTML/AI context.
+
+## Block Model Summary
+Every entity uses the same persistence envelope: `id`, `type`, workspace/root/parent identifiers, `children_ids`, concurrency/versioning timestamps, typed `properties`, flexible `metadata`, and multi-part `content`. Some highlights:
+- `properties`: schemaful attributes (including `groups` membership) defined by each block subclass in `docs/decipher_block_specification.md`.
+- `metadata`: open annotations, embeddings, AI outputs, or audit flags.
+- `content`: typed payload pieces (text, structured object, tabular data, blobs) so multiple consumers can choose the best format.
+
+The canonical schema and the current base block types (documents, sections, paragraphs, datasets, groups, etc.) are documented in `docs/decipher_block_specification.md`.
+
+## Hierarchy & Grouping
+- **Canonical tree:** the single source of truth for structure, order, navigation, and access control. Every operation that changes parent/children relationships runs through the Domain Service so invariants are preserved.
+- **Secondary trees:** page groups, chunk groups, and other derived views are built by tagging canonical blocks with group IDs rather than duplicating nodes. Queries gather the canonical blocks for a group and then reorder them by the canonical hierarchy when rendering. See `docs/decipher_block_grouping_model.md` for the current strategy.
+
+### Invariants Checklist (must hold at all times)
+- Exactly one canonical parent per block (roots excluded).
+- Parent owns ordering via `children_ids`; no child stores its own index.
+- `root_id` identifies the canonical root document for every descendant.
+- Group membership is expressed only via `properties.groups` (UUIDs of group blocks); no synced duplicate nodes.
+- Writes that change structure must pass optimistic concurrency checks (version).
+
+## Rendering Model
+Rendering happens entirely outside the model. Renderer engines dispatch on block type, accept configuration (recursive rendering, metadata inclusion, theming), and walk hydrated trees via injected dispatcher references. This keeps the core model stable while allowing Markdown, HTML, UI, AI-prompt, or future graph outputs to coexist. The renderer contract and examples live in `docs/decipher_renderer_architecture.md`.
+
+## Filtering & Query Model
+Filtering supports both structural constraints (`where` clauses on block attributes such as `type`, `root_id`, `parent_id`) and semantic filtering across JSON properties (`filter` clauses, nested paths, logical `and`/`or` compositions). The repository layer bridges SQLite/Postgres differences (JSON1 vs JSONB) and exposes unified APIs for analytical queries and derived views while respecting the canonical tree.
+
+### Example Queries
+- Structural: `{"where": {"type": "paragraph", "root_id": "..."}}`
+- Semantic: `{"filter": {"property": "category", "equals": "Preventive"}}`
+- Combined: `{ "where": {"type": "record"}, "filter": {"property": "status", "equals": "Active"} }`
+
+## Architecture Layers
+1. **Document Store:** orchestrates ingestion (Markdown, datasets, PDFs, etc.), enforces grouping metadata, and coordinates derived processing (AI chunking, dataset extraction). It wires parsers into block graphs and delegates rendering/export requests.
+2. **Domain Service:** public-facing API that enforces invariants (single parent, parent-owned ordering, valid groups, version control), sequences multi-block writes, triggers side effects (caches, vector indexes), and returns hydrated domain models.
+3. **Repository:** internal persistence adapter that executes SQLAlchemy queries, hydrates hierarchies (depth-controlled), batches writes, and maintains optimistic concurrency. It never includes business logic or side effects.
+4. **Renderer & Consumers:** separate strategies that accept hydrated trees and produce AI prompts, UIs, exports, or derived analytics. They rely on the canonical model’s typed blocks but stay agnostic to persistence.
+
+For more about storage responsibilities and the Domain Service/Repository contract, see `docs/decipher_storage_layers_summary.md`.
+
+## Design Trade‑offs (Why This Shape)
+- **Tags over synced secondary trees:** avoids duplication, reduces drift, and uses canonical order to render any view; trades for sorting work at query/render time.
+- **Pluggable renderer vs embedded formatting:** keeps model stable and AI‑friendly; trades for explicit orchestration when rendering.
+- **Typed properties with free‑form metadata:** balances schema validation with space for AI annotations; trades for careful versioning of property schemas.
+
+## Glossary
+- **Canonical tree:** the authoritative hierarchy of content blocks (single parent, parent‑owned order).
+- **Group block:** an anchor block (e.g., `page_group`, `chunk_group`) that represents a secondary view; canonical blocks reference it via `properties.groups`.
+- **Hydration:** loading a block and some or all of its descendants/ancestors into memory so traversals are local and deterministic.
+- **Renderer engine:** dispatcher that maps block types to components and recurses to produce output.
+
+## Future Extensions & Benefits
+- Supports relationships as first-class entities, version histories, vector embeddings, and real-time collaboration because the canonical model remains stable.
+- Separation of concerns (model vs renderer vs persistence) simplifies adoption, testing, and evolution.
+- Typed blocks with multi-part content make AI prompting and analytical queries predictable without brittle conversions.
+
+## Supporting References
+1. **Canonical block schema and type system:** `docs/decipher_block_specification.md`
+2. **Grouping model for pages, chunks, and domains:** `docs/decipher_block_grouping_model.md`
+ 3. **Renderer architecture and dispatcher pattern:** `docs/decipher_renderer_architecture.md`
+4. **Layered storage responsibilities:** `docs/decipher_storage_layers_summary.md`
+
+## Version Control Table
+| Date | Version | Summary | Reference |
+| --- | --- | --- | --- |
+| 2025-11-12 | 2.3 | Restored motivation, principles, and layer descriptions while keeping the details in companion specs. | `docs/decipher_block_specification.md`, `docs/decipher_block_grouping_model.md`, `docs/decipher_renderer_architecture.md`, `docs/decipher_storage_layers_summary.md` |
+| 2025-11-12 | 2.4 | Added audience/reading guide, non‑goals, end‑to‑end example, invariants checklist, trade‑offs, glossary, and query examples. | Same as above |
