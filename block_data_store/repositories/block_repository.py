@@ -49,10 +49,8 @@ class BlockRepository:
             raise ValueError("Depth must be a non-negative integer or None.")
 
         with self._session_factory() as session:
-            trashed = self._trashed_target_subquery()
             query = session.query(DbBlock).filter(DbBlock.id == str(block_id))
-            query = self._only_visible(query, trashed)
-            db_row = query.one_or_none()
+            db_row = self._only_visible(query).one_or_none()
             if db_row is None:
                 return None
 
@@ -75,36 +73,13 @@ class BlockRepository:
     ) -> list[Block]:
         """Return blocks matching structural and semantic filters."""
         with self._session_factory() as session:
-            trashed = self._trashed_target_subquery()
             query = session.query(DbBlock)
 
-            if root is not None:
-                root_alias = aliased(DbBlock)
-                query = query.join(root_alias, DbBlock.root_id == root_alias.id)
-                if root.where is not None:
-                    query = apply_structural_filters(query, root_alias, root.where)
-                if root.property_filter is not None:
-                    query = query.filter(
-                        build_filter_expression(root_alias, root.property_filter)
-                    )
+            query = self._apply_related_filters(query, relation="root", filter_spec=root)
+            query = self._apply_related_filters(query, relation="parent", filter_spec=parent)
+            query = self._apply_filters(query, DbBlock, where=where, property_filter=property_filter)
 
-            if parent is not None:
-                parent_alias = aliased(DbBlock)
-                query = query.join(parent_alias, DbBlock.parent_id == parent_alias.id)
-                if parent.where is not None:
-                    query = apply_structural_filters(query, parent_alias, parent.where)
-                if parent.property_filter is not None:
-                    query = query.filter(
-                        build_filter_expression(parent_alias, parent.property_filter)
-                    )
-
-            if where is not None:
-                query = apply_structural_filters(query, DbBlock, where)
-
-            if property_filter is not None:
-                query = query.filter(build_filter_expression(DbBlock, property_filter))
-
-            query = self._only_visible(query, trashed)
+            query = self._only_visible(query)
 
             if limit is not None:
                 query = query.limit(limit)
@@ -496,33 +471,55 @@ class BlockRepository:
 
     @staticmethod
     def _trashed_target_subquery():
-        visibility = select(
-            DbBlock.id.label("id"),
-            DbBlock.parent_id.label("parent_id"),
-            DbBlock.in_trash.label("in_trash"),
-            DbBlock.id.label("target_id"),
-        ).cte("block_visibility", recursive=True)
-
-        visibility = visibility.union_all(
-            select(
-                DbBlock.id,
-                DbBlock.parent_id,
-                DbBlock.in_trash,
-                visibility.c.target_id,
-            ).where(DbBlock.id == visibility.c.parent_id)
+        trashed = select(DbBlock.id.label("target_id")).where(DbBlock.in_trash.is_(True)).cte(
+            "trashed_closure", recursive=True
         )
 
-        return (
-            select(visibility.c.target_id)
-            .where(visibility.c.in_trash.is_(True))
-            .distinct()
-            .subquery()
+        trashed = trashed.union_all(
+            select(DbBlock.id).where(DbBlock.parent_id == trashed.c.target_id)
         )
 
-    @staticmethod
-    def _only_visible(query, trashed_subquery):
-        return query.outerjoin(trashed_subquery, DbBlock.id == trashed_subquery.c.target_id).filter(
-            trashed_subquery.c.target_id.is_(None)
+        return select(trashed.c.target_id).distinct().subquery()
+
+    def _only_visible(self, query):
+        session = query.session
+        has_trashed = session.query(DbBlock.id).filter(DbBlock.in_trash.is_(True)).limit(1).first()
+        if has_trashed is None:
+            return query
+        trashed = self._trashed_target_subquery()
+        return query.outerjoin(trashed, DbBlock.id == trashed.c.target_id).filter(trashed.c.target_id.is_(None))
+
+    def _apply_filters(
+        self,
+        query,
+        model,
+        *,
+        where: WhereClause | None = None,
+        property_filter: FilterExpression | None = None,
+    ):
+        if where is not None:
+            query = apply_structural_filters(query, model, where)
+        if property_filter is not None:
+            query = query.filter(build_filter_expression(model, property_filter))
+        return query
+
+    def _apply_related_filters(self, query, *, relation: str, filter_spec):
+        if filter_spec is None:
+            return query
+
+        alias = aliased(DbBlock)
+        if relation == "root":
+            query = query.join(alias, DbBlock.root_id == alias.id)
+        elif relation == "parent":
+            query = query.join(alias, DbBlock.parent_id == alias.id)
+        else:
+            raise ValueError(f"Unsupported relation filter: {relation}")
+
+        return self._apply_filters(
+            query,
+            alias,
+            where=getattr(filter_spec, "where", None),
+            property_filter=getattr(filter_spec, "property_filter", None),
         )
 
     def _with_resolvers(self, block: Block) -> Block:
