@@ -12,27 +12,41 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer
 
 
 class BlockType(str, Enum):
+    WORKSPACE = "workspace"
+    COLLECTION = "collection"
     DOCUMENT = "document"
+    DATASET = "dataset"
+    DERIVED_CONTENT_CONTAINER = "derived_content_container"
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     BULLETED_LIST_ITEM = "bulleted_list_item"
     NUMBERED_LIST_ITEM = "numbered_list_item"
-    DATASET = "dataset"
     RECORD = "record"
+    QUOTE = "quote"
+    CODE = "code"
+    TABLE = "table"
+    HTML = "html"
+    OBJECT = "object"
+    GROUP_INDEX = "group_index"
     PAGE_GROUP = "page_group"
     CHUNK_GROUP = "chunk_group"
-    PAGE = "page"
+    UNSUPPORTED = "unsupported"
     SYNCED = "synced"
 
 
 class Content(BaseModel):
     """Simplified multi-part content payload."""
 
-    text: str | None = None
+    plain_text: str | None = Field(default=None, alias="text")
     object: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
     synced_from: UUID | None = None
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    @property
+    def text(self) -> str | None:  # pragma: no cover - compatibility shim
+        return self.plain_text
 
     @field_serializer("synced_from")
     def _serialize_synced_from(self, value: UUID | None):  # pragma: no cover - trivial

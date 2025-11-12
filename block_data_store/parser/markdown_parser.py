@@ -228,7 +228,7 @@ def _handle_block_code(
         dataset_id = add_node(
             BlockType.DATASET,
             parent_id,
-            properties={"dataset_type": dataset_type},
+            properties={"category": dataset_type},
             content=dataset_content,
         )
         if isinstance(payload, dict):

@@ -141,7 +141,7 @@ def measure_sample(
             parent=ParentFilter(
                 where=WhereClause(type=BlockType.HEADING, root_id=str(doc_id)),
                 property_filter=PropertyFilter(
-                    path="content.text",
+                    path="content.plain_text",
                     value=heading_hint,
                     operator=FilterOperator.CONTAINS,
                 ),

@@ -31,7 +31,6 @@ class MarkdownRenderer(Renderer):
                 BlockType.RECORD: RecordComponent(),
                 BlockType.PAGE_GROUP: PageGroupComponent(),
                 BlockType.SYNCED: SyncedComponent(),
-                BlockType.PAGE: PageComponent(),
             }
         if self._fallback_component is None:
             self._fallback_component = GenericComponent()
@@ -134,7 +133,11 @@ class DatasetComponent:
         options: RenderOptions,
         extra: Mapping[str, Any],
     ) -> str:
-        dataset_type = getattr(block.properties, "dataset_type", None) or "default"
+        dataset_type = (
+            getattr(block.properties, "category", None)
+            or getattr(block.properties, "dataset_type", None)
+            or "default"
+        )
         if block.content and block.content.text:
             formatted = block.content.text
         else:
@@ -223,21 +226,6 @@ class SyncedComponent:
                 return _join_sections([notice, resolved_text])
         label = block.content.synced_from if block.content else None
         sections = [f"> Unresolved synced block ({label or block.id})"]
-        sections.extend(_render_children(engine, block, options, extra))
-        return _join_sections(sections)
-
-
-class PageComponent:
-    def render(
-        self,
-        block: Block,
-        *,
-        engine: MarkdownRenderer,
-        options: RenderOptions,
-        extra: Mapping[str, Any],
-    ) -> str:
-        title = getattr(block.properties, "title", None) or f"Page {block.id}"
-        sections = [f"## {title}"]
         sections.extend(_render_children(engine, block, options, extra))
         return _join_sections(sections)
 

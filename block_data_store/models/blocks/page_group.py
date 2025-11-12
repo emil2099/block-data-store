@@ -8,7 +8,7 @@ from .base import Block, BlockProperties, BlockType
 
 
 class PageGroupProps(BlockProperties):
-    title: str | None = None
+    page_number: int = Field(ge=1)
 
 
 class PageGroupBlock(Block):

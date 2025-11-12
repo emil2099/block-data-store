@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import Field
 
 from .base import Block, BlockProperties, BlockType
 
 
 class ParagraphProps(BlockProperties):
-    pass
+    groups: tuple[UUID, ...] = Field(default_factory=tuple)
 
 
 class ParagraphBlock(Block):

@@ -118,7 +118,7 @@ def test_dataset_renderer_includes_child_records(block_factory):
         parent_id=None,
         root_id=dataset_id,
         children_ids=(record_id,),
-        properties={"dataset_type": "inventory"},
+        properties={"category": "inventory"},
         content=None,
     )
     record = block_factory(

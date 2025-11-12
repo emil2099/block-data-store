@@ -9,6 +9,7 @@ from .base import Block, BlockProperties, BlockType
 
 class DocumentProps(BlockProperties):
     title: str | None = None
+    category: str | None = None
 
 
 class DocumentBlock(Block):

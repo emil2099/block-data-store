@@ -8,7 +8,7 @@ from .base import Block, BlockProperties, BlockType
 
 
 class ChunkGroupProps(BlockProperties):
-    title: str | None = None
+    pass
 
 
 class ChunkGroupBlock(Block):

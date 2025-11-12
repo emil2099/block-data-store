@@ -175,6 +175,7 @@ def test_get_page_group_resolves_synced_children(document_store, repository, blo
                 block_type=BlockType.PAGE_GROUP,
                 parent_id=document_id,
                 root_id=document_id,
+                properties={"page_number": 1},
                 children_ids=(synced_a_id, synced_b_id),
             ),
             block_factory(
@@ -237,6 +238,7 @@ def test_get_page_group_errors_when_synced_reference_missing(document_store, rep
                 block_type=BlockType.PAGE_GROUP,
                 parent_id=document_id,
                 root_id=document_id,
+                properties={"page_number": 1},
                 children_ids=(synced_id,),
             ),
             block_factory(

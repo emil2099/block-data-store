@@ -457,7 +457,7 @@ def test_query_blocks_supports_structural_and_parent_filters(repository, block_f
                 parent_id=document_id,
                 root_id=document_id,
                 children_ids=(record_preventive_id, record_detective_id),
-                properties={"dataset_type": "controls"},
+                properties={"category": "controls"},
             ),
             block_factory(
                 block_id=dataset_inventory_id,
@@ -465,7 +465,7 @@ def test_query_blocks_supports_structural_and_parent_filters(repository, block_f
                 parent_id=document_id,
                 root_id=document_id,
                 children_ids=(record_inventory_id,),
-                properties={"dataset_type": "inventory"},
+                properties={"category": "inventory"},
             ),
             block_factory(
                 block_id=record_preventive_id,
@@ -507,7 +507,7 @@ def test_query_blocks_supports_structural_and_parent_filters(repository, block_f
         where=WhereClause(type=BlockType.RECORD),
         parent=ParentFilter(
             where=WhereClause(type=BlockType.DATASET, root_id=document_id),
-            property_filter=PropertyFilter(path="dataset_type", value="controls"),
+            property_filter=PropertyFilter(path="category", value="controls"),
         ),
     )
     controls_ids = {block.id for block in controls_records}
@@ -552,7 +552,7 @@ def test_query_blocks_supports_root_filters(repository, block_factory):
                 parent_id=document_controls_id,
                 root_id=document_controls_id,
                 children_ids=(record_controls_id,),
-                properties={"dataset_type": "controls"},
+                properties={"category": "controls"},
             ),
             block_factory(
                 block_id=dataset_policies_id,
@@ -560,7 +560,7 @@ def test_query_blocks_supports_root_filters(repository, block_factory):
                 parent_id=document_policies_id,
                 root_id=document_policies_id,
                 children_ids=(record_policies_id,),
-                properties={"dataset_type": "policies"},
+                properties={"category": "policies"},
             ),
             block_factory(
                 block_id=record_controls_id,
@@ -626,7 +626,7 @@ def test_query_blocks_supports_nested_json_paths_and_operators(repository, block
                 parent_id=document_id,
                 root_id=document_id,
                 children_ids=(record_active_id, record_draft_id),
-                properties={"dataset_type": "controls"},
+                properties={"category": "controls"},
             ),
             block_factory(
                 block_id=record_active_id,
@@ -694,7 +694,7 @@ def test_query_blocks_supports_nested_json_paths_and_operators(repository, block
     contains_match = repository.query_blocks(
         where=WhereClause(type=BlockType.RECORD),
         property_filter=PropertyFilter(
-            path="content.text",
+            path="content.plain_text",
             value="Control",
             operator=FilterOperator.CONTAINS,
         ),
