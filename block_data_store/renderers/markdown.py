@@ -23,6 +23,10 @@ class MarkdownRenderer(Renderer):
                 BlockType.PARAGRAPH: ParagraphComponent(),
                 BlockType.BULLETED_LIST_ITEM: BulletedListItemComponent(),
                 BlockType.NUMBERED_LIST_ITEM: NumberedListItemComponent(),
+                BlockType.QUOTE: QuoteComponent(),
+                BlockType.CODE: CodeComponent(),
+                BlockType.TABLE: TableComponent(),
+                BlockType.HTML: HtmlComponent(),
                 BlockType.DATASET: DatasetComponent(),
                 BlockType.RECORD: RecordComponent(),
                 BlockType.PAGE_GROUP: PageGroupComponent(),
@@ -115,6 +119,84 @@ class ParagraphComponent:
     ) -> str:
         text = block.content.plain_text if block.content and block.content.plain_text else ""
         sections = [text] if text else []
+        sections.extend(_render_children(engine, block, options, extra))
+        return _join_sections(sections)
+
+
+class QuoteComponent:
+    def render(
+        self,
+        block: Block,
+        *,
+        engine: MarkdownRenderer,
+        options: RenderOptions,
+        extra: Mapping[str, Any],
+    ) -> str:
+        sections: list[str] = []
+        if block.content and block.content.plain_text:
+            sections.append(block.content.plain_text)
+        sections.extend(_render_children(engine, block, options, extra))
+        body = _join_sections(sections)
+        if not body:
+            return ""
+        return _quote_lines(body)
+
+
+class CodeComponent:
+    def render(
+        self,
+        block: Block,
+        *,
+        engine: MarkdownRenderer,
+        options: RenderOptions,
+        extra: Mapping[str, Any],
+    ) -> str:
+        language = getattr(block.properties, "language", None) or ""
+        code_text = block.content.plain_text if block.content and block.content.plain_text else ""
+        fence = f"```{language}" if language else "```"
+        section = "\n".join([fence, code_text, "```"]).strip("\n")
+        sections = [section]
+        sections.extend(_render_children(engine, block, options, extra))
+        return _join_sections(sections)
+
+
+class TableComponent:
+    def render(
+        self,
+        block: Block,
+        *,
+        engine: MarkdownRenderer,
+        options: RenderOptions,
+        extra: Mapping[str, Any],
+    ) -> str:
+        table = block.content.object if block.content and block.content.object else {}
+        headers = list(table.get("headers") or [])
+        rows = [list(row) for row in table.get("rows") or []]
+        width = len(headers) or (len(rows[0]) if rows else 0)
+        if width == 0:
+            return ""
+
+        alignments = table.get("align") or []
+        header_line = _format_table_row(headers or ["" for _ in range(width)], width)
+        align_line = _format_alignment_row(alignments, width)
+        body_lines = [_format_table_row(row, width) for row in rows]
+        table_lines = [header_line, align_line, *body_lines]
+        sections = ["\n".join(table_lines)]
+        sections.extend(_render_children(engine, block, options, extra))
+        return _join_sections(sections)
+
+
+class HtmlComponent:
+    def render(
+        self,
+        block: Block,
+        *,
+        engine: MarkdownRenderer,
+        options: RenderOptions,
+        extra: Mapping[str, Any],
+    ) -> str:
+        html_text = block.content.plain_text if block.content and block.content.plain_text else ""
+        sections = [html_text] if html_text else []
         sections.extend(_render_children(engine, block, options, extra))
         return _join_sections(sections)
 
@@ -246,6 +328,17 @@ def _join_sections(sections: list[str]) -> str:
     return output
 
 
+def _quote_lines(text: str) -> str:
+    lines = text.splitlines() or [""]
+    quoted = []
+    for line in lines:
+        if line:
+            quoted.append(f"> {line}")
+        else:
+            quoted.append(">")
+    return "\n".join(quoted)
+
+
 def _indent_markdown(text: str, spaces: int = 2) -> str:
     indent = " " * spaces
     return "\n".join(f"{indent}{line}" if line else line for line in text.splitlines())
@@ -288,6 +381,34 @@ def _ordered_index(block: Block) -> int:
         if sibling.id == block.id:
             return index or 1
     return 1
+
+
+def _format_table_row(values: list[Any], width: int) -> str:
+    cells = ["" if value is None else str(value) for value in values]
+    if len(cells) < width:
+        cells.extend([""] * (width - len(cells)))
+    elif len(cells) > width:
+        cells = cells[:width]
+    return f"| {' | '.join(cells)} |"
+
+
+def _format_alignment_row(alignments: list[Any], width: int) -> str:
+    markers = []
+    for index in range(width):
+        alignment = alignments[index] if index < len(alignments) else None
+        markers.append(_alignment_marker(alignment))
+    return f"| {' | '.join(markers)} |"
+
+
+def _alignment_marker(alignment: Any) -> str:
+    mapping = {
+        None: "---",
+        "left": ":---",
+        "center": ":---:",
+        "right": "---:",
+    }
+    key = str(alignment).lower() if alignment is not None else None
+    return mapping.get(key, "---")
 # List item components -------------------------------------------------------
 
 

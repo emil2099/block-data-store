@@ -1,8 +1,7 @@
-"""Minimal Markdown → Block conversion tailored for the POC."""
+"""Markdown → Block conversion that mirrors Mistune's AST structure."""
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,10 +21,12 @@ from block_data_store.models.block import (
 
 MarkdownAst = list[dict[str, Any]]
 
+_DEFAULT_PLUGINS: tuple[str, ...] = ("table",)
+
 
 def parse_markdown(source: str) -> MarkdownAst:
     """Return Mistune's AST for the provided Markdown source."""
-    markdown = mistune.create_markdown(renderer="ast")
+    markdown = mistune.create_markdown(renderer="ast", plugins=_DEFAULT_PLUGINS)
     return markdown(source)
 
 
@@ -109,52 +110,88 @@ def ast_to_blocks(
         properties=document_props,
         node_id=document_id,
     )
-    document_node = by_id[document_node_id]
-
     heading_stack: list[tuple[int, UUID]] = []
 
-    def current_parent() -> UUID:
-        return heading_stack[-1][1] if heading_stack else document_node_id
+    _process_tokens(
+        tokens,
+        default_parent=document_node_id,
+        heading_stack=heading_stack,
+        add_node=add_node,
+        by_id=by_id,
+        document_id=document_node_id,
+        document_props=document_props,
+    )
+
+    return _realise_blocks(nodes, children, workspace_id, document_id, timestamp)
+
+
+def _process_tokens(
+    tokens: MarkdownAst,
+    *,
+    default_parent: UUID,
+    heading_stack: list[tuple[int, UUID]] | None,
+    add_node: Any,
+    by_id: dict[UUID, dict[str, Any]],
+    document_id: UUID,
+    document_props: dict[str, Any],
+) -> None:
+    local_heading_stack = heading_stack if heading_stack is not None else []
 
     for token in tokens:
         token_type = token.get("type")
-        if token_type == "heading":
-            level = int(token.get("attrs", {}).get("level", 1))
-            text = _extract_text(token).strip()
-            if not text:
-                continue
-            if level == 1 and not document_props.get("title"):
-                document_props["title"] = text
-                heading_stack.clear()
-                continue
-            while heading_stack and heading_stack[-1][0] >= level:
-                heading_stack.pop()
-            heading_id = add_node(
-                BlockType.HEADING,
-                current_parent(),
-                properties={"level": level},
-                content=Content(plain_text=text),
-            )
-            heading_stack.append((level, heading_id))
+        if token_type in {"blank_line", "linebreak", "softbreak"}:
             continue
 
+        if token_type == "heading":
+            _append_heading(
+                add_node,
+                token,
+                local_heading_stack,
+                default_parent=default_parent,
+                document_id=document_id,
+                document_props=document_props,
+                allow_document_title=heading_stack is not None,
+            )
+            continue
+
+        parent_id = _parent_for_content(local_heading_stack, default_parent)
+
         if token_type == "paragraph":
-            _append_paragraph(add_node, current_parent(), token)
+            _append_paragraph(add_node, parent_id, token)
             continue
 
         if token_type == "list":
-            _emit_list(add_node, current_parent(), token, children, by_id)
+            _emit_list(add_node, parent_id, token, by_id)
             continue
 
         if token_type == "block_code":
-            _handle_block_code(add_node, current_parent(), token, children, by_id)
+            _append_code(add_node, parent_id, token)
+            continue
+
+        if token_type == "block_quote":
+            quote_id = add_node(BlockType.QUOTE, parent_id)
+            _process_tokens(
+                token.get("children", []),
+                default_parent=quote_id,
+                heading_stack=None,
+                add_node=add_node,
+                by_id=by_id,
+                document_id=document_id,
+                document_props=document_props,
+            )
+            continue
+
+        if token_type in {"html_block", "block_html"}:
+            _append_html(add_node, parent_id, token)
+            continue
+
+        if token_type == "table":
+            _append_table(add_node, parent_id, token)
             continue
 
         fallback = _extract_text(token).strip()
         if fallback:
-            _append_paragraph(add_node, current_parent(), {"raw": fallback})
-
-    return _realise_blocks(nodes, children, workspace_id, document_id, timestamp)
+            _append_paragraph(add_node, parent_id, {"raw": fallback})
 
 
 def _append_paragraph(
@@ -175,7 +212,6 @@ def _emit_list(
     add_node: Any,
     parent_id: UUID,
     token: dict[str, Any],
-    children: dict[UUID, list[UUID]],
     by_id: dict[UUID, dict[str, Any]],
 ) -> None:
     ordered = bool(token.get("attrs", {}).get("ordered", False))
@@ -202,54 +238,164 @@ def _emit_list(
                 else:
                     _append_paragraph(add_node, item_id, {"raw": text})
             elif child_type == "list":
-                _emit_list(add_node, item_id, child, children, by_id)
+                _emit_list(add_node, item_id, child, by_id)
             else:
                 text = _extract_text(child).strip()
                 if text:
                     _append_paragraph(add_node, item_id, {"raw": text})
 
 
-def _handle_block_code(
+def _parent_for_content(
+    heading_stack: list[tuple[int, UUID]] | None,
+    fallback_parent: UUID,
+) -> UUID:
+    if heading_stack:
+        return heading_stack[-1][1]
+    return fallback_parent
+
+
+def _append_heading(
+    add_node: Any,
+    token: dict[str, Any],
+    heading_stack: list[tuple[int, UUID]],
+    *,
+    default_parent: UUID,
+    document_id: UUID,
+    document_props: dict[str, Any],
+    allow_document_title: bool,
+) -> None:
+    level = int(token.get("attrs", {}).get("level", 1))
+    text = _extract_text(token).strip()
+    if not text:
+        return
+
+    if allow_document_title and default_parent == document_id and level == 1 and not document_props.get("title"):
+        document_props["title"] = text
+        heading_stack.clear()
+        return
+
+    while heading_stack and heading_stack[-1][0] >= level:
+        heading_stack.pop()
+
+    parent_id = heading_stack[-1][1] if heading_stack else default_parent
+    heading_id = add_node(
+        BlockType.HEADING,
+        parent_id,
+        properties={"level": level},
+        content=Content(plain_text=text),
+    )
+    heading_stack.append((level, heading_id))
+
+
+def _append_code(
     add_node: Any,
     parent_id: UUID,
     token: dict[str, Any],
-    children: dict[UUID, list[UUID]],
-    by_id: dict[UUID, dict[str, Any]],
 ) -> None:
     info = (token.get("attrs", {}).get("info") or "").strip()
-    raw_text = (token.get("raw") or "").strip()
+    raw_text = (token.get("raw") or "").rstrip("\n")
     if not raw_text and not info:
         return
 
-    if info.startswith("dataset:"):
-        dataset_type = info.split(":", 1)[1].strip() or "default"
-        payload = _parse_dataset_payload(raw_text)
-        dataset_content = Content(plain_text=raw_text) if raw_text else None
-        dataset_id = add_node(
-            BlockType.DATASET,
-            parent_id,
-            properties={"category": dataset_type},
-            content=dataset_content,
-        )
-        if isinstance(payload, dict):
-            records = payload.get("records")
-            if isinstance(records, list):
-                for record in records:
-                    if isinstance(record, dict):
-                        add_node(
-                            BlockType.RECORD,
-                            dataset_id,
-                            content=Content(data=dict(record)),
-                        )
-        return
+    properties = {"language": info or None}
+    add_node(
+        BlockType.CODE,
+        parent_id,
+        properties=properties,
+        content=Content(plain_text=raw_text),
+    )
 
-    if raw_text:
-        add_node(
-            BlockType.PARAGRAPH,
-            parent_id,
-            content=Content(plain_text=raw_text),
-            metadata={"code_block": True, "info": info or None},
-        )
+
+def _append_html(
+    add_node: Any,
+    parent_id: UUID,
+    token: dict[str, Any],
+) -> None:
+    raw_text = (token.get("raw") or "").rstrip("\n")
+    if not raw_text:
+        return
+    add_node(
+        BlockType.HTML,
+        parent_id,
+        content=Content(plain_text=raw_text),
+    )
+
+
+def _append_table(
+    add_node: Any,
+    parent_id: UUID,
+    token: dict[str, Any],
+) -> None:
+    headers: list[list[str]] = []
+    rows: list[list[str]] = []
+    alignments: list[str | None] = []
+
+    for section in token.get("children", []):
+        section_type = section.get("type")
+        if section_type == "table_head":
+            header_rows, aligns = _table_section_rows(section)
+            headers = header_rows
+            if aligns:
+                alignments = aligns
+        elif section_type == "table_body":
+            body_rows, _ = _table_section_rows(section)
+            rows.extend(body_rows)
+
+    table_object: dict[str, Any] = {
+        "headers": headers[0] if headers else [],
+        "rows": rows,
+    }
+    if alignments:
+        table_object["align"] = alignments
+
+    add_node(
+        BlockType.TABLE,
+        parent_id,
+        content=Content(object=table_object),
+    )
+
+
+def _table_section_rows(section: dict[str, Any]) -> tuple[list[list[str]], list[str | None]]:
+    rows: list[list[str]] = []
+    alignments: list[str | None] = []
+    children = section.get("children", [])
+    if children and children[0].get("type") == "table_cell":
+        current_row: list[str] = []
+        for index, cell in enumerate(children):
+            text = _extract_text(cell).strip()
+            current_row.append(text)
+            align_value = cell.get("attrs", {}).get("align")
+            if len(alignments) <= index:
+                alignments.append(_normalise_alignment(align_value))
+            elif align_value is not None:
+                alignments[index] = _normalise_alignment(align_value)
+        rows.append(current_row)
+        return rows, alignments
+
+    for row in children:
+        if row.get("type") != "table_row":
+            continue
+        current_row = []
+        for index, cell in enumerate(row.get("children", [])):
+            text = _extract_text(cell).strip()
+            current_row.append(text)
+            attrs = cell.get("attrs", {})
+            align_value = attrs.get("align")
+            if len(alignments) <= index:
+                alignments.append(_normalise_alignment(align_value))
+            elif align_value is not None:
+                alignments[index] = _normalise_alignment(align_value)
+        rows.append(current_row)
+    return rows, alignments
+
+
+def _normalise_alignment(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).lower()
+    if text in {"left", "center", "right"}:
+        return text
+    return None
 
 
 def _realise_blocks(
@@ -292,6 +438,9 @@ def _realise_blocks(
 
 
 def _extract_text(token: dict[str, Any]) -> str:
+    token_type = token.get("type")
+    if token_type in {"softbreak", "linebreak"}:
+        return "\n"
     raw = token.get("raw")
     if isinstance(raw, str):
         return raw
@@ -299,16 +448,6 @@ def _extract_text(token: dict[str, Any]) -> str:
     for child in token.get("children", []):
         parts.append(_extract_text(child))
     return "".join(parts)
-
-
-def _parse_dataset_payload(raw_text: str) -> Any:
-    stripped = raw_text.strip()
-    if not stripped:
-        return {}
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return stripped
 
 
 __all__ = [

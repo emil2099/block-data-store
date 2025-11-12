@@ -255,3 +255,80 @@ def test_markdown_renderer_renders_lists(block_factory):
     )
 
     assert output == expected
+
+
+def test_markdown_renderer_renders_quote_block(block_factory):
+    quote_id = uuid4()
+    paragraph_id = uuid4()
+    quote = block_factory(
+        block_id=quote_id,
+        block_type=BlockType.QUOTE,
+        parent_id=None,
+        root_id=quote_id,
+        children_ids=(paragraph_id,),
+    )
+    paragraph = block_factory(
+        block_id=paragraph_id,
+        block_type=BlockType.PARAGRAPH,
+        parent_id=quote_id,
+        root_id=quote_id,
+        content=Content(plain_text="Quoted text."),
+    )
+    blocks = _wire([quote, paragraph])
+    renderer = MarkdownRenderer()
+
+    output = renderer.render(blocks[quote_id])
+
+    assert output.startswith("> Quoted text.")
+
+
+def test_markdown_renderer_renders_code_block(block_factory):
+    code = block_factory(
+        block_type=BlockType.CODE,
+        parent_id=None,
+        root_id=uuid4(),
+        properties={"language": "python"},
+        content=Content(plain_text="print('ok')"),
+    )
+    renderer = MarkdownRenderer()
+
+    output = renderer.render(code)
+
+    assert "```python" in output
+    assert "print('ok')" in output
+
+
+def test_markdown_renderer_renders_table_block(block_factory):
+    table = block_factory(
+        block_type=BlockType.TABLE,
+        parent_id=None,
+        root_id=uuid4(),
+        content=Content(
+            object={
+                "headers": ["Term", "Definition"],
+                "rows": [["RTO", "Recovery Time Objective"]],
+                "align": ["left", "right"],
+            }
+        ),
+    )
+    renderer = MarkdownRenderer()
+
+    output = renderer.render(table)
+
+    assert "| Term | Definition |" in output
+    assert "| :--- | ---: |" in output
+    assert "| RTO | Recovery Time Objective |" in output
+
+
+def test_markdown_renderer_renders_html_block(block_factory):
+    html = block_factory(
+        block_type=BlockType.HTML,
+        parent_id=None,
+        root_id=uuid4(),
+        content=Content(plain_text="<div>Note</div>"),
+    )
+    renderer = MarkdownRenderer()
+
+    output = renderer.render(html)
+
+    assert output == "<div>Note</div>"

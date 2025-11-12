@@ -4,51 +4,61 @@ from block_data_store.models.block import BlockType
 from block_data_store.parser import markdown_to_blocks
 
 
-def test_markdown_to_blocks_builds_expected_hierarchy():
+def test_markdown_parser_emits_core_blocks():
     source = """# Sample Document
+
+Intro paragraph before any sections.
 
 ## First Section
 
 Paragraph content lives here.
 
-## Second Section
+> Keep it simple.
+> Ship quickly.
 
 - Item one
 - Item two
+    - Nested bullet
 
-```dataset:controls
-{
-  "records": [
-    {"title": "Segregation of duties", "category": "Preventive"},
-    {"title": "Maker-checker", "category": "Detective"}
-  ]
-}
+```python
+print("hi")
 ```
+
+| Term | Definition |
+| ---- | ---------- |
+| RPO  | Recovery Point Objective |
+
+<div data-role="note">Raw HTML</div>
 """
+
     blocks = markdown_to_blocks(source)
 
-    assert [block.type for block in blocks[:2]] == [BlockType.DOCUMENT, BlockType.HEADING]
-
     document = blocks[0]
-    first_heading = blocks[1]
-
+    assert document.type is BlockType.DOCUMENT
     assert document.properties.title == "Sample Document"
+
+    first_heading = next(block for block in blocks if block.type is BlockType.HEADING)
     assert first_heading.parent_id == document.id
-    assert document.children_ids[0] == first_heading.id
-    assert first_heading.content and first_heading.content.plain_text == "First Section"
     assert getattr(first_heading.properties, "level") == 2
 
-    list_item = next(block for block in blocks if block.type == BlockType.BULLETED_LIST_ITEM)
-    assert not list_item.metadata
-    assert "Item one" in (list_item.content.plain_text or "")
+    paragraph = next(block for block in blocks if block.type is BlockType.PARAGRAPH and block.parent_id == first_heading.id)
+    assert paragraph.content and paragraph.content.plain_text.startswith("Paragraph content")
 
-    dataset_block = next(block for block in blocks if block.type == BlockType.DATASET)
-    record_children = [
-        block for block in blocks if block.parent_id == dataset_block.id and block.type == BlockType.RECORD
-    ]
-    categories = {
-        child.content.data.get("category")
-        for child in record_children
-        if child.content and child.content.data
-    }
-    assert categories == {"Preventive", "Detective"}
+    quote = next(block for block in blocks if block.type is BlockType.QUOTE)
+    quote_children = [child for child in blocks if child.parent_id == quote.id]
+    assert len(quote_children) == 1
+    assert quote_children[0].type is BlockType.PARAGRAPH
+    assert "Keep it simple." in (quote_children[0].content.plain_text or "")
+    assert "Ship quickly." in (quote_children[0].content.plain_text or "")
+
+    code_block = next(block for block in blocks if block.type is BlockType.CODE)
+    assert code_block.content and "print" in code_block.content.plain_text
+    assert getattr(code_block.properties, "language") == "python"
+
+    table_block = next(block for block in blocks if block.type is BlockType.TABLE)
+    assert table_block.content and table_block.content.object
+    assert table_block.content.object["headers"] == ["Term", "Definition"]
+    assert table_block.content.object["rows"][0][1] == "Recovery Point Objective"
+
+    html_block = next(block for block in blocks if block.type is BlockType.HTML)
+    assert html_block.content and html_block.content.plain_text.startswith("<div data-role=\"note\">")

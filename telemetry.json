@@ -5,11 +5,11 @@
     {
       "documents": 10,
       "sample_size": 10,
-      "avg_fetch_ms": 148.418133193627,
-      "avg_render_ms": 4.132075991947204,
+      "avg_fetch_ms": 171.12197420792654,
+      "avg_render_ms": 5.621579114813358,
       "avg_render_length": 31233.0,
-      "avg_filter_paragraph_ms": 39.15052068186924,
-      "avg_filter_parent_ms": 2.921428228728473,
+      "avg_filter_paragraph_ms": 2.5894499849528074,
+      "avg_filter_parent_ms": 2.8986267745494843,
       "avg_paragraph_count": 15.0,
       "avg_parent_count": 0.0,
       "total_blocks": 4900
@@ -17,11 +17,11 @@
     {
       "documents": 100,
       "sample_size": 10,
-      "avg_fetch_ms": 534.328609611839,
-      "avg_render_ms": 3.8898106082342565,
+      "avg_fetch_ms": 98.2374571962282,
+      "avg_render_ms": 3.913845692295581,
       "avg_render_length": 31233.0,
-      "avg_filter_paragraph_ms": 440.57079448830336,
-      "avg_filter_parent_ms": 7.5657702051103115,
+      "avg_filter_paragraph_ms": 1.7628517118282616,
+      "avg_filter_parent_ms": 1.6900314949452877,
       "avg_paragraph_count": 15.0,
       "avg_parent_count": 0.0,
       "total_blocks": 49000
@@ -29,11 +29,11 @@
     {
       "documents": 1000,
       "sample_size": 10,
-      "avg_fetch_ms": 4979.409723205026,
-      "avg_render_ms": 3.799051872920245,
+      "avg_fetch_ms": 110.80249688820913,
+      "avg_render_ms": 4.322749224957079,
       "avg_render_length": 31233.0,
-      "avg_filter_paragraph_ms": 4921.154247317463,
-      "avg_filter_parent_ms": 2.576743101235479,
+      "avg_filter_paragraph_ms": 2.0143627072684467,
+      "avg_filter_parent_ms": 1.9304160960018635,
       "avg_paragraph_count": 15.0,
       "avg_parent_count": 0.0,
       "total_blocks": 490000
