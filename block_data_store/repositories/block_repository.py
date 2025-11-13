@@ -114,22 +114,31 @@ class BlockRepository:
                 session.merge(DbBlock(**payload))
             session.commit()
 
-    def set_in_trash(self, block_ids: Sequence[UUID], *, in_trash: bool) -> None:
-        """Update the trash flag for a list of blocks."""
+    def set_in_trash(
+        self,
+        block_ids: Sequence[UUID],
+        *,
+        in_trash: bool,
+        cascade: bool = False,
+    ) -> None:
+        """Update the trash flag for provided blocks (optionally cascading to descendants)."""
         id_list = [str(block_id) for block_id in block_ids]
         if not id_list:
             return
 
         with self._session_factory() as session:
-            existing_ids = {
-                row_id
-                for (row_id,) in session.query(DbBlock.id).filter(DbBlock.id.in_(id_list)).all()
-            }
+            # Ensure all requested roots exist.
+            existing_rows = session.query(DbBlock.id).filter(DbBlock.id.in_(id_list)).all()
+            existing_ids = {row_id for (row_id,) in existing_rows}
             missing = sorted(block_id for block_id in id_list if block_id not in existing_ids)
             if missing:
                 raise BlockNotFoundError(f"Block(s) {missing} do not exist.")
 
-            session.query(DbBlock).filter(DbBlock.id.in_(id_list)).update(
+            target_ids = existing_ids if not cascade else self._collect_descendant_ids(session, existing_ids)
+            if not target_ids:
+                return
+
+            session.query(DbBlock).filter(DbBlock.id.in_(target_ids)).update(
                 {
                     DbBlock.in_trash: in_trash,
                     DbBlock.version: DbBlock.version + 1,
@@ -500,6 +509,23 @@ class BlockRepository:
             )
 
         return wired_cache
+
+    def _collect_descendant_ids(self, session: Session, root_ids: Iterable[str]) -> set[str]:
+        """Return every descendant id reachable from ``root_ids`` (including the roots)."""
+        pending = list(root_ids)
+        seen: set[str] = set()
+
+        while pending:
+            current_id = pending.pop()
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            row = session.get(DbBlock, current_id)
+            if row is None:
+                continue
+            pending.extend(row.children_ids or [])
+
+        return seen
 
 
     def _apply_filters(
