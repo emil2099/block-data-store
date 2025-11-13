@@ -589,44 +589,31 @@ To maintain a lean and focused initial implementation, a number of block types h
 
 ### 12.1. Handling Deletion
 
-The system will adopt a hierarchical, non-cascading soft-delete model. This approach is chosen to ensure that user-facing delete and restore operations are instantaneous, while centralizing the complexity of hierarchical state within the data-retrieval layer.
+The system now uses a **cascading soft-delete model**. This aligns the data platform with its read-heavy usage profile by paying the complexity cost once, at the time of deletion or restoration, instead of on every read.
 
-**1. Mechanism: The Implicit Model**
+**1. Mechanism: Explicit Cascades**
 
-The soft-delete mechanism is defined by the following principles:
+- **The in_trash Flag:** Deletion state continues to be tracked via the `in_trash` boolean on every block row.
+- **Domain Service–Driven Cascades:** When a block is trashed, the Domain Service loads the full subtree for that block and sets `in_trash = TRUE` on **every** descendant. Restoring a block performs the same cascade in reverse, flipping the flag back to `FALSE` for the entire subtree.
+- **Canonical Structure Preserved:** Cascading writes do **not** mutate `children_ids` or any other structural fields. Ordering and hierarchy remain intact so future restores, moves, or renders operate on the same canonical graph.
 
-- **The in_trash Flag:** Deletion state is managed by the in_trash boolean flag in the Base Block Schema. A TRUE value indicates the block is considered "in the trash".
-- **Non-Cascading Writes:** When a parent block is moved to the trash, **only that specific block's in_trash flag is set to TRUE**. All of its descendants remain unchanged in the database but are considered *implicitly* trashed by inheritance.
-- **Canonical Structures Stay Intact:** Neither the repository nor the store rewrites children_ids when a child is hidden. The canonical order is always persisted exactly as authored so future writes can reuse the same block instances without losing references.
-- **Instantaneous Operations:** This model ensures that both delete and restore operations are single, atomic database updates, making them feel instantaneous to the user regardless of the number of child blocks.
+**2. Read-Time Simplicity**
 
-**2. Critical Implementation Requirement: Hierarchy-Aware Queries**
+- Because every deleted node is explicitly marked, repository queries only need a simple predicate: `WHERE blocks.in_trash = FALSE`.
+- APIs that need to inspect trashed content (e.g., a Trash view or cascading restore) can opt in via an explicit `include_trashed` flag; the default behavior everywhere else is to exclude trashed rows.
+- Recursive CTEs for visibility checks have been eliminated. Fetching a block tree now executes straightforward lookups that no longer depend on ancestor state.
 
-The choice of a non-cascading write model introduces a non-negotiable requirement for all data retrieval logic.
+**3. Operational Considerations**
 
-> Every query that fetches blocks for user-facing views MUST be hierarchy-aware.
-> 
-> 
-> To determine if a block is truly visible, a query cannot simply check the block's own in_trash flag. It must traverse up the block's entire parental hierarchy to the root, ensuring that no ancestor is marked as in_trash.
-> 
-> This must be implemented efficiently in a single database roundtrip, typically using a **Recursive Common Table Expression (CTE)**.
-> 
+- **Write Amplification:** Deleting a large subtree performs a batched, multi-row update. This is intentional: deletes are rare, while reads happen constantly.
+- **Consistency Guarantees:** Because every node has an explicit flag, there is no such thing as an “implicitly” hidden block. Auditing and migration tooling can reason about trash state with simple SQL filters.
+- **Domain Service Contract:** Business workflows must call the Domain Service (Document Store) for delete/restore so the cascade is enforced. Direct repository access skips this guardrail and is reserved for infrastructure tooling.
 
-This is the foundational integrity constraint for the entire system. Building this logic into the core data access layer from the beginning is essential to prevent deleted content from appearing in any part of the application.
+**4. Implementation Checklist**
 
-In practice, the repository filters visibility (via a recursive CTE) but still returns canonical models. Consumers such as renderers or the Document Store simply skip children that fail to resolve, ensuring that read views stay clean without mutating the persisted structure.
-
-**3. Staged Implementation Strategy**
-
-To manage initial complexity while building on a correct technical foundation, the implementation of the deletion feature will be staged.
-
-- **V1 Implementation (Core Mechanism):**
-    - The in_trash column must be added to the blocks table from the initial migration.
-    - All data access methods for reading block trees (e.g., fetching a document's content, search queries) **must** implement the recursive, hierarchy-aware query logic from Day 1.
-- **Future Implementation (User-Facing Features):**
-    - The user interface for a "Trash" view, which would list all blocks where in_trash = TRUE.
-    - The "Restore" functionality, which sets the in_trash flag back to FALSE.
-    - A background job for handling permanent deletion and cleaning up any dangling references that result from it.
+- Document Store implements subtree discovery plus cascaded updates for both delete and restore flows.
+- Block repository read paths filter by `in_trash = FALSE` by default and expose `include_trashed=True` for administrative callers.
+- Future user features (Trash UI, permanent purge, etc.) simply query `WHERE in_trash = TRUE` without needing hierarchy-aware logic.
 
 ### 12.2. Handling AI-Generated Content
 

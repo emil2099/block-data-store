@@ -605,7 +605,7 @@ def test_query_blocks_supports_root_filters(repository, block_factory):
     assert [block.id for block in policies_datasets] == [dataset_policies_id]
 
 
-def test_soft_delete_hides_blocks_and_descendants(repository, block_factory):
+def test_in_trash_flag_controls_visibility(repository, block_factory):
     document_id = uuid4()
     heading_id = uuid4()
     paragraph_id = uuid4()
@@ -635,19 +635,27 @@ def test_soft_delete_hides_blocks_and_descendants(repository, block_factory):
         ]
     )
 
-    repository.set_in_trash([heading_id], in_trash=True)
+    repository.set_in_trash([heading_id, paragraph_id], in_trash=True)
 
     assert repository.get_block(heading_id) is None
     assert repository.get_block(paragraph_id) is None
+    hidden_heading = repository.get_block(heading_id, include_trashed=True)
+    assert hidden_heading is not None
+    assert hidden_heading.in_trash is True
 
     paragraphs = repository.query_blocks(where=WhereClause(type=BlockType.PARAGRAPH))
     assert paragraphs == []
+    all_paragraphs = repository.query_blocks(
+        where=WhereClause(type=BlockType.PARAGRAPH),
+        include_trashed=True,
+    )
+    assert [block.id for block in all_paragraphs] == [paragraph_id]
 
     document = repository.get_block(document_id, depth=0)
     assert document is not None
     assert document.children_ids == (heading_id,)
 
-    repository.set_in_trash([heading_id], in_trash=False)
+    repository.set_in_trash([heading_id, paragraph_id], in_trash=False)
 
     restored_paragraph = repository.get_block(paragraph_id)
     assert restored_paragraph is not None

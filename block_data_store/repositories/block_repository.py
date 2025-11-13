@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Iterable, Sequence
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from block_data_store.db.schema import DbBlock
@@ -43,14 +42,22 @@ class BlockRepository:
     def __init__(self, session_factory: sessionmaker[Session]):
         self._session_factory = session_factory
 
-    def get_block(self, block_id: UUID, *, depth: int | None = 0) -> Block | None:
+    def get_block(
+        self,
+        block_id: UUID,
+        *,
+        depth: int | None = 0,
+        include_trashed: bool = False,
+    ) -> Block | None:
         """Fetch a block by identifier with optional depth prefetch."""
         if depth is not None and depth < 0:
             raise ValueError("Depth must be a non-negative integer or None.")
 
         with self._session_factory() as session:
             query = session.query(DbBlock).filter(DbBlock.id == str(block_id))
-            db_row = self._only_visible(query).one_or_none()
+            if not include_trashed:
+                query = query.filter(DbBlock.in_trash.is_(False))
+            db_row = query.one_or_none()
             if db_row is None:
                 return None
 
@@ -58,7 +65,13 @@ class BlockRepository:
                 return self._with_resolvers(self._to_model(db_row))
 
             cache: dict[UUID, Block] = {}
-            self._hydrate_subgraph(session, db_row, depth, cache)
+            self._hydrate_subgraph(
+                session,
+                db_row,
+                depth,
+                cache,
+                include_trashed=include_trashed,
+            )
             wired_cache = self._wire_cache(cache)
             return wired_cache.get(UUID(db_row.id))
 
@@ -70,6 +83,7 @@ class BlockRepository:
         parent: ParentFilter | None = None,
         root: RootFilter | None = None,
         limit: int | None = None,
+        include_trashed: bool = False,
     ) -> list[Block]:
         """Return blocks matching structural and semantic filters."""
         with self._session_factory() as session:
@@ -79,7 +93,8 @@ class BlockRepository:
             query = self._apply_related_filters(query, relation="parent", filter_spec=parent)
             query = self._apply_filters(query, DbBlock, where=where, property_filter=property_filter)
 
-            query = self._only_visible(query)
+            if not include_trashed:
+                query = query.filter(DbBlock.in_trash.is_(False))
 
             if limit is not None:
                 query = query.limit(limit)
@@ -106,14 +121,21 @@ class BlockRepository:
             return
 
         with self._session_factory() as session:
-            rows = session.query(DbBlock).filter(DbBlock.id.in_(id_list)).all()
-            if len(rows) != len(id_list):
-                found_ids = {row.id for row in rows}
-                missing = [block_id for block_id in id_list if block_id not in found_ids]
+            existing_ids = {
+                row_id
+                for (row_id,) in session.query(DbBlock.id).filter(DbBlock.id.in_(id_list)).all()
+            }
+            missing = sorted(block_id for block_id in id_list if block_id not in existing_ids)
+            if missing:
                 raise BlockNotFoundError(f"Block(s) {missing} do not exist.")
-            for row in rows:
-                row.in_trash = in_trash
-                row.version += 1
+
+            session.query(DbBlock).filter(DbBlock.id.in_(id_list)).update(
+                {
+                    DbBlock.in_trash: in_trash,
+                    DbBlock.version: DbBlock.version + 1,
+                },
+                synchronize_session=False,
+            )
             session.commit()
 
     def set_children(
@@ -402,9 +424,11 @@ class BlockRepository:
         root_row: DbBlock,
         depth: int | None,
         cache: dict[UUID, Block],
+        *,
+        include_trashed: bool,
     ) -> None:
         """Populate cache with blocks up to the requested depth."""
-        if root_row.in_trash:
+        if root_row.in_trash and not include_trashed:
             return
 
         block = self._to_model(root_row)
@@ -428,12 +452,20 @@ class BlockRepository:
 
         for child_id in children_ids:
             child_row = row_by_id.get(child_id)
-            if child_row is None or child_row.in_trash:
+            if child_row is None:
+                continue
+            if child_row.in_trash and not include_trashed:
                 continue
             child_uuid = UUID(child_row.id)
             if child_uuid in cache:
                 continue
-            self._hydrate_subgraph(session, child_row, next_depth, cache)
+            self._hydrate_subgraph(
+                session,
+                child_row,
+                next_depth,
+                cache,
+                include_trashed=include_trashed,
+            )
 
     def _wire_cache(self, cache: dict[UUID, Block]) -> dict[UUID, Block]:
         """Attach shared resolvers to a cached block subgraph."""
@@ -469,25 +501,6 @@ class BlockRepository:
 
         return wired_cache
 
-    @staticmethod
-    def _trashed_target_subquery():
-        trashed = select(DbBlock.id.label("target_id")).where(DbBlock.in_trash.is_(True)).cte(
-            "trashed_closure", recursive=True
-        )
-
-        trashed = trashed.union_all(
-            select(DbBlock.id).where(DbBlock.parent_id == trashed.c.target_id)
-        )
-
-        return select(trashed.c.target_id).distinct().subquery()
-
-    def _only_visible(self, query):
-        session = query.session
-        has_trashed = session.query(DbBlock.id).filter(DbBlock.in_trash.is_(True)).limit(1).first()
-        if has_trashed is None:
-            return query
-        trashed = self._trashed_target_subquery()
-        return query.outerjoin(trashed, DbBlock.id == trashed.c.target_id).filter(trashed.c.target_id.is_(None))
 
     def _apply_filters(
         self,

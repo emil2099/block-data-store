@@ -61,12 +61,12 @@ While relationships are logically directional, they are stored canonically to pr
 
 ### 5.2. Integrity with Block Soft Deletes
 
-The relationship model fully respects the hierarchical, non-cascading soft-delete model defined in the Block Specification.
+The relationship model fully respects the cascading soft-delete contract defined in the Block Specification.
 
-> A relationship is only considered "visible" or "active" if both of its endpoint blocks are visible. A block is not visible if it, or any of its ancestors in the canonical tree, is marked with in_trash = TRUE.
+> A relationship is only considered "visible" or "active" if both of its endpoint blocks have `in_trash = FALSE`.
 > 
 
-**Critical Implementation Requirement:** All repository queries that fetch relationships **must** implement a hierarchy-aware filter. This is typically achieved using a **Recursive Common Table Expression (CTE)** to first determine the complete set of visible block_ids before joining with and returning results from the relationships table.
+Because the Domain Service now cascades delete/restore operations to every descendant block, visibility checks no longer require recursive ancestry lookups. Repository queries simply join relationships to the two endpoint blocks and apply `WHERE blocks.in_trash = FALSE` on each side before returning results. Administrative views that need to reason about trashed data can opt into `include_trashed` semantics explicitly.
 
 ### 5.3. Relationship Lifecycle (Deletion)
 
@@ -100,10 +100,10 @@ The Domain Service will be the single entry point for all relationship operation
 
 ## 7. Risks and Mitigations
 
-### 7.1. Risk: Hierarchical Query Performance
+### 7.1. Risk: Cascading Write Cost
 
-- **Risk:** The use of Recursive CTEs to respect the in_trash hierarchy can be computationally expensive on very deep or wide block trees, potentially leading to slow query performance.
-- **Mitigation:** This is a known performance trade-off for ensuring data correctness. The primary mitigation strategy will be to explore application-level caching during implementation. For example, for a given root_id, the ancestry map and the set of visible blocks could be pre-calculated and cached, reducing the need for repeated recursive queries.
+- **Risk:** Deleting or restoring a block with thousands of descendants requires a multi-row update, which can introduce momentary write latency compared to the previous single-row toggle.
+- **Mitigation:** Deletes remain a rare operation. The Domain Service batches the affected IDs and performs a single transactional update, ensuring consistency while containing the runtime cost. Monitoring will be added around long-running cascades so we can revisit chunking or background execution if workloads demand it.
 
 ### 7.2. Risk: Semantic Ambiguity of rel_type
 

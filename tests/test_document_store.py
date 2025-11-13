@@ -137,7 +137,7 @@ def test_set_children_without_version(document_store, repository, block_factory)
     assert section.children_ids == (para_b, para_a)
 
 
-def test_soft_deleted_children_are_filtered(document_store, repository, block_factory):
+def test_set_in_trash_cascades_descendants(document_store, repository, block_factory):
     document_id = uuid4()
     heading_id = uuid4()
     paragraph_id = uuid4()
@@ -173,6 +173,49 @@ def test_soft_deleted_children_are_filtered(document_store, repository, block_fa
     document = document_store.get_root_tree(document_id, depth=None)
     assert document.children_ids == (heading_id,)
     assert document.children() == []
+    heading = repository.get_block(heading_id, include_trashed=True)
+    paragraph = repository.get_block(paragraph_id, include_trashed=True)
+    assert heading is not None and heading.in_trash
+    assert paragraph is not None and paragraph.in_trash
+
+
+def test_restore_unsets_trash_for_descendants(document_store, repository, block_factory):
+    document_id = uuid4()
+    heading_id = uuid4()
+    paragraph_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+                children_ids=(heading_id,),
+            ),
+            block_factory(
+                block_id=heading_id,
+                block_type=BlockType.HEADING,
+                parent_id=document_id,
+                root_id=document_id,
+                children_ids=(paragraph_id,),
+            ),
+            block_factory(
+                block_id=paragraph_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_id,
+                root_id=document_id,
+            ),
+        ]
+    )
+
+    document_store.set_in_trash([heading_id], in_trash=True)
+    document_store.set_in_trash([heading_id], in_trash=False)
+
+    restored_heading = repository.get_block(heading_id)
+    restored_paragraph = repository.get_block(paragraph_id)
+    assert restored_heading is not None and not restored_heading.in_trash
+    assert restored_paragraph is not None and not restored_paragraph.in_trash
 
 
 def test_trashing_document_makes_root_inaccessible(document_store, repository, block_factory):

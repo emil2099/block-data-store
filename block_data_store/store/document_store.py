@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Iterator, Sequence
 from uuid import UUID
 
 from block_data_store.models.block import Block, BlockType
@@ -117,8 +117,20 @@ class DocumentStore:
         self._repository.upsert_blocks(blocks)
 
     def set_in_trash(self, block_ids: Sequence[UUID], *, in_trash: bool) -> None:
-        """Toggle the trash flag for the supplied blocks."""
-        self._repository.set_in_trash(block_ids, in_trash=in_trash)
+        """Toggle the trash flag for supplied blocks and their descendants."""
+        if not block_ids:
+            return
+
+        target_ids: set[UUID] = set()
+        for block_id in block_ids:
+            subtree = self._load_subtree(block_id)
+            for node in self._walk_subtree(subtree):
+                target_ids.add(node.id)
+
+        if not target_ids:
+            return
+
+        self._repository.set_in_trash(tuple(target_ids), in_trash=in_trash)
 
     def get_block(self, block_id: UUID, *, depth: int | None = 0) -> Block | None:
         """Fetch an individual block via the store."""
@@ -130,6 +142,33 @@ class DocumentStore:
         if block is None:
             raise DocumentStoreError(f"Block {block_id} does not exist.")
         return block
+
+    def _load_subtree(self, block_id: UUID) -> Block:
+        """Load a block with its complete subtree, including trashed blocks."""
+        block = self._repository.get_block(
+            block_id,
+            depth=None,
+            include_trashed=True,
+        )
+        if block is None:
+            raise DocumentStoreError(f"Block {block_id} does not exist.")
+        return block
+
+    @staticmethod
+    def _walk_subtree(root: Block) -> Iterator[Block]:
+        """Depth-first traversal generator that yields each node exactly once."""
+        stack: list[Block] = [root]
+        seen: set[UUID] = set()
+
+        while stack:
+            node = stack.pop()
+            if node.id in seen:
+                continue
+            seen.add(node.id)
+            yield node
+            children = node.children()
+            if children:
+                stack.extend(reversed(children))
 
 
 __all__ = [
