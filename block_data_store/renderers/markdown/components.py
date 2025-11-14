@@ -88,7 +88,12 @@ class DocumentComponent(BaseComponent):
         title = getattr(block.properties, "title", None)
         heading = f"# {title}" if title else f"# Document {block.id}"
         sections = [heading]
-        sections.extend(ctx.render_children(block))
+        for child in block.children():
+            if child.type in {BlockType.GROUP_INDEX, BlockType.PAGE_GROUP}:
+                continue
+            rendered = ctx.render_block(child)
+            if rendered.strip():
+                sections.append(rendered)
         return ctx.join(sections)
 
 
@@ -240,6 +245,38 @@ class GenericComponent(BaseComponent):
         if text:
             sections.append(text)
         sections.extend(ctx.render_children(block))
+        return ctx.join(sections)
+
+
+class PageGroupComponent(BaseComponent):
+    def render_block(self, block: Block, ctx: RenderContext) -> str:
+        root = _find_root(block)
+        ordered = _ordered_blocks(root)
+        sections: list[str] = []
+        for candidate in ordered:
+            if candidate.id == block.id:
+                continue
+            groups = getattr(candidate.properties, "groups", None)
+            if not groups or block.id not in groups:
+                continue
+            if candidate.type in {BlockType.GROUP_INDEX, BlockType.PAGE_GROUP}:
+                continue
+            rendered = ctx.render_block(candidate)
+            if rendered.strip():
+                sections.append(rendered)
+        return ctx.join(sections)
+
+
+class GroupIndexComponent(BaseComponent):
+    def render_block(self, block: Block, ctx: RenderContext) -> str:
+        index_type = getattr(block.properties, "group_index_type", None)
+        if index_type != "page":
+            return ""
+        sections: list[str] = []
+        for child in block.children():
+            rendered = ctx.render_block(child)
+            if rendered.strip():
+                sections.append(rendered)
         return ctx.join(sections)
 
 
@@ -421,6 +458,27 @@ def _pretty_label(key: str) -> str:
     return text.title() if text else key
 
 
+def _find_root(block: Block) -> Block:
+    current = block
+    while True:
+        parent = current.parent()
+        if parent is None:
+            return current
+        current = parent
+
+
+def _ordered_blocks(root: Block) -> list[Block]:
+    ordered: list[Block] = []
+
+    def walk(node: Block) -> None:
+        ordered.append(node)
+        for child in node.children():
+            walk(child)
+
+    walk(root)
+    return ordered
+
+
 DEFAULT_COMPONENTS: dict[BlockType, RendererComponent] = {
     BlockType.DOCUMENT: DocumentComponent(),
     BlockType.HEADING: HeadingComponent(),
@@ -435,8 +493,8 @@ DEFAULT_COMPONENTS: dict[BlockType, RendererComponent] = {
     BlockType.RECORD: RecordComponent(),
     BlockType.OBJECT: ObjectComponent(),
     BlockType.DERIVED_CONTENT_CONTAINER: StructuralComponent(),
-    BlockType.GROUP_INDEX: StructuralComponent(),
-    BlockType.PAGE_GROUP: StructuralComponent(),
+    BlockType.GROUP_INDEX: GroupIndexComponent(),
+    BlockType.PAGE_GROUP: PageGroupComponent(),
     BlockType.CHUNK_GROUP: StructuralComponent(),
     BlockType.UNSUPPORTED: UnsupportedComponent(),
 }

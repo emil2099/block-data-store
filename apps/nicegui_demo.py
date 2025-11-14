@@ -8,6 +8,7 @@ visitors can understand what is happening behind the scenes.
 
 from __future__ import annotations
 
+import io
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -25,7 +26,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from block_data_store.db.engine import create_engine, create_session_factory
 from block_data_store.db.schema import create_all
 from block_data_store.models.block import Block, BlockType, Content
-from block_data_store.parser import load_markdown_path
+from block_data_store.parser import load_markdown_path, markdown_to_blocks
+from block_data_store.parser.azure_di_parser import azure_di_to_blocks
+from block_data_store.parser.dataset_parser import dataset_to_blocks
 from block_data_store.renderers.base import RenderOptions
 from block_data_store.renderers.markdown import MarkdownRenderer
 from block_data_store.repositories.filters import (
@@ -158,6 +161,7 @@ SIDEBAR_HELP_MD = """
 class AppState:
     store: DocumentStore
     renderer: MarkdownRenderer
+    show_trashed: bool = False
     documents: list[Block] = field(default_factory=list)
     documents_by_id: dict[str, Block] = field(default_factory=dict)
     document_label_to_id: dict[str, str] = field(default_factory=dict)
@@ -188,7 +192,11 @@ class AppState:
 
 def _document_label(block: Block) -> str:
     title = getattr(block.properties, "title", None)
-    return title or f"Document {block.id}"
+    prefix = "Dataset" if block.type is BlockType.DATASET else "Document"
+    base = title or f"{prefix} {block.id}"
+    if getattr(block, "in_trash", False):
+        base += " (trashed)"
+    return base
 
 
 def _block_label(block: Block) -> str:
@@ -206,7 +214,20 @@ def _block_label(block: Block) -> str:
         if isinstance(data, dict) and data:
             key, value = next(iter(data.items()))
             return f"{block.type.value}: {key}={value}"
-    return f"{block.type.value}: {block.id}"
+    label = f"{block.type.value}: {block.id}"
+    if getattr(block, "in_trash", False):
+        label += " (trashed)"
+    return label
+
+
+def _attach_source_metadata(blocks: list[Block], source_name: str | None) -> list[Block]:
+    if not blocks or not source_name:
+        return blocks
+    root = blocks[0]
+    metadata = dict(root.metadata)
+    metadata["source"] = source_name
+    blocks[0] = root.model_copy(update={"metadata": metadata})
+    return blocks
 
 
 def _short_id(value: UUID | str | None) -> str:
@@ -222,7 +243,7 @@ def _resolve_block(state: AppState, block_id: str | None) -> Block | None:
     if cached is not None:
         return cached
     try:
-        fetched = state.store.get_block(UUID(block_id), depth=1)
+        fetched = state.store.get_block(UUID(block_id), depth=1, include_trashed=state.show_trashed)
     except Exception:
         return None
     if fetched is not None:
@@ -284,6 +305,7 @@ def _seed_documents(state: AppState) -> None:
         return
     for path in sorted(SAMPLE_DATA_DIR.glob("*.md")):
         blocks = load_markdown_path(path)
+        blocks = _attach_source_metadata(blocks, path.name)
         state.store.save_blocks(blocks)
 
 
@@ -434,7 +456,7 @@ def _load_document(state: AppState, document_id: str | None) -> None:
         return
 
     root_uuid = UUID(doc_value)
-    root_block = state.store.get_root_tree(root_uuid, depth=None)
+    root_block = state.store.get_root_tree(root_uuid, depth=None, include_trashed=state.show_trashed)
     state.block_cache[str(root_block.id)] = root_block
     state.documents_by_id[str(root_block.id)] = root_block
     tree_payload = [_build_tree(state.block_cache, root_block)]
@@ -454,7 +476,13 @@ def _load_document(state: AppState, document_id: str | None) -> None:
 
 
 def _refresh_documents(state: AppState, selected: str | None = None) -> None:
-    state.documents = state.store.list_documents()
+    documents = state.store.list_documents()
+    dataset_roots = [
+        block
+        for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
+        if block.parent_id is None
+    ]
+    state.documents = documents + dataset_roots
     state.documents_by_id = {str(doc.id): doc for doc in state.documents}
     state.document_label_to_id = {
         _document_label(doc): str(doc.id) for doc in state.documents
@@ -691,6 +719,37 @@ def _save_block_changes(state: AppState) -> None:
     ui.notify("Block saved", color="positive")
 
 
+def _set_trash_state(state: AppState, *, in_trash: bool) -> None:
+    block_id = state.selected_block_id
+    if not block_id:
+        ui.notify("Select a block first", color="warning")
+        return
+    block = _resolve_block(state, block_id)
+    if block is None:
+        ui.notify("Selected block could not be resolved.", color="negative")
+        return
+    if block.parent_id is None:
+        ui.notify("Cannot change trash state of the root block.", color="warning")
+        return
+    try:
+        state.store.set_in_trash([block.id], in_trash=in_trash, cascade=True)
+    except Exception as exc:
+        ui.notify(str(exc), color="negative")
+        return
+
+    state.block_cache = {}
+    _load_document(state, state.selected_document_id)
+    if not in_trash:
+        _select_block(state, block_id)
+    ui.notify("Block restored" if not in_trash else "Block moved to trash", color="positive")
+
+
+def _toggle_show_trashed(state: AppState, value: bool) -> None:
+    state.show_trashed = value
+    state.block_cache = {}
+    _load_document(state, state.selected_document_id)
+
+
 def _rerender_on_toggle(state: AppState) -> Callable[[events.ValueChangeEventArguments], None]:
     def handler(_event: events.ValueChangeEventArguments) -> None:
         if state.selected_block_id:
@@ -735,6 +794,54 @@ def _build_sidebar(state: AppState) -> None:
         ).props("bordered")
         state.tree_component.classes("w-full rounded-lg border p-2 bg-white overflow-auto")
         state.tree_component.style("height: calc(100vh - 220px);")
+
+
+def _build_upload_section(state: AppState) -> None:
+    with ui.expansion("0. Upload Documents & Datasets", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
+        ui.markdown(
+            "Upload sample content to see it immediately in the canonical tree."
+        ).classes("text-sm text-slate-600 pb-2 w-full")
+
+        async def handle_markdown(event: events.UploadEventArguments) -> None:
+            try:
+                content = await event.file.text()
+            except Exception as exc:
+                ui.notify(f"Upload failed: {exc}", color="negative")
+                return
+            blocks = markdown_to_blocks(content)
+            blocks = _attach_source_metadata(blocks, event.file.name)
+            state.store.save_blocks(blocks)
+            ui.notify("Stored Markdown document", color="positive")
+            _refresh_documents(state, selected=str(blocks[0].id))
+
+        async def handle_pdf(event: events.UploadEventArguments) -> None:
+            try:
+                data = await event.file.read()
+                blocks = azure_di_to_blocks(io.BytesIO(data))
+            except Exception as exc:
+                ui.notify(f"Azure DI parse failed: {exc}", color="negative")
+                return
+            blocks = _attach_source_metadata(blocks, event.file.name)
+            state.store.save_blocks(blocks)
+            ui.notify("Stored Azure DI document", color="positive")
+            _refresh_documents(state, selected=str(blocks[0].id))
+
+        async def handle_dataset(event: events.UploadEventArguments) -> None:
+            try:
+                data = await event.file.read()
+                blocks = dataset_to_blocks(io.BytesIO(data))
+            except Exception as exc:
+                ui.notify(f"Dataset parse failed: {exc}", color="negative")
+                return
+            blocks = _attach_source_metadata(blocks, event.file.name)
+            state.store.save_blocks(blocks)
+            ui.notify("Stored dataset", color="positive")
+            _refresh_documents(state, selected=str(blocks[0].id))
+
+        with ui.row().classes("gap-3 flex-wrap"):
+            ui.upload(label="Markdown (.md)", on_upload=handle_markdown).props("accept=.md,text/markdown")
+            ui.upload(label="PDF (Azure DI)", on_upload=handle_pdf).props("accept=application/pdf")
+            ui.upload(label="CSV dataset", on_upload=handle_dataset).props("accept=.csv,text/csv")
 
 
 def _build_overview_section(state: AppState) -> None:
@@ -876,6 +983,21 @@ def _build_inspector_section(state: AppState) -> None:
 
         ui.button("Save block changes", on_click=lambda: _save_block_changes(state)).classes("mt-2 w-full sm:w-auto")
 
+        with ui.row().classes("gap-2 flex-wrap mt-2"):
+            ui.button(
+                "Move to trash",
+                on_click=lambda: _set_trash_state(state, in_trash=True),
+            ).props("outline")
+            ui.button(
+                "Restore from trash",
+                on_click=lambda: _set_trash_state(state, in_trash=False),
+            )
+            ui.checkbox(
+                "Show trashed blocks",
+                value=state.show_trashed,
+                on_change=lambda e: _toggle_show_trashed(state, bool(e.value)),
+            )
+
 
 def _build_preview_section(state: AppState) -> None:
     with ui.expansion("5. Renderer Preview", value=True).classes("shadow-sm w-full").props("header-class=font-bold"):
@@ -919,6 +1041,7 @@ def build_ui(state: AppState) -> None:
         _build_sidebar(state)
 
         with ui.column().classes("flex-1 gap-4"):
+            _build_upload_section(state)
             _build_overview_section(state)
             _build_document_snapshot_section(state)
             _build_filters_section(state)

@@ -1,2 +1,0 @@
-"""NiceGUI demo package."""
-

@@ -8,11 +8,12 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 from typing import IO, Any, Literal, Sequence
 from uuid import UUID, uuid4
 
-from block_data_store.models.block import Block
+from block_data_store.models.block import Block, BlockType
 from block_data_store.models.blocks import (
     GroupIndexBlock,
     GroupIndexProps,
@@ -71,6 +72,7 @@ def azure_di_to_blocks(
     timestamp: datetime | None = None,
     config: AzureDiConfig | None = None,
     client: Any = None,
+    strip_marker_html: bool = True,
 ) -> list[Block]:
     """Parse source bytes via Azure DI and convert to Decipher blocks."""
 
@@ -116,6 +118,9 @@ def azure_di_to_blocks(
 
     if page_groups:
         blocks = _attach_page_group_blocks(blocks, page_groups)
+
+    if strip_marker_html:
+        blocks = _remove_marker_html_blocks(blocks)
 
     return _with_metadata(blocks, payload, grouping)
 
@@ -421,19 +426,35 @@ def _normalise_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def _remove_marker_html_blocks(blocks: Sequence[Block]) -> list[Block]:
+    pattern = re.compile(r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\")\s*-->\s*$")
+    ids_to_remove: set[UUID] = set()
+    for block in blocks:
+        if block.type is BlockType.HTML and block.content and block.content.plain_text:
+            if pattern.match(block.content.plain_text.strip()):
+                ids_to_remove.add(block.id)
+    if not ids_to_remove:
+        return list(blocks)
+
+    updated: list[Block] = []
+    for block in blocks:
+        if block.id in ids_to_remove:
+            continue
+        if block.children_ids:
+            children = tuple(child_id for child_id in block.children_ids if child_id not in ids_to_remove)
+            if children != block.children_ids:
+                block = block.model_copy(update={"children_ids": children})
+        updated.append(block)
+    return updated
+
+
 def _with_metadata(blocks: Sequence[Block], payload: dict[str, Any], grouping: str) -> list[Block]:
     if not blocks:
         return list(blocks)
     document = blocks[0]
     metadata = dict(document.metadata)
-    metadata.update(
-        {
-            "source": "azure_di",
-            "di_model": payload.get("model_id"),
-            "di_pages": len(payload.get("pages", [])),
-            "grouping": grouping,
-        }
-    )
+    metadata.setdefault("source", payload.get("source_name") or "azure_di")
+    metadata["grouping"] = grouping
     updated_document = document.model_copy(update={"metadata": metadata})
     updated = [updated_document]
     updated.extend(blocks[1:])

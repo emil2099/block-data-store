@@ -32,11 +32,12 @@ class DocumentStore:
         root_block_id: UUID,
         *,
         depth: int | None = 1,
+        include_trashed: bool = False,
     ) -> Block:
         """Return the main block tree anchored at ``root_block_id``."""
-        root_block = self._require_block(root_block_id, depth=depth)
-        if root_block.type is not BlockType.DOCUMENT:
-            raise DocumentStoreError(f"Block {root_block_id} is not a document root.")
+        root_block = self._require_block(root_block_id, depth=depth, include_trashed=include_trashed)
+        if root_block.type not in {BlockType.DOCUMENT, BlockType.DATASET}:
+            raise DocumentStoreError(f"Block {root_block_id} is not a supported root type.")
         return root_block
 
     def list_documents(self, *, limit: int | None = None) -> list[Block]:
@@ -123,13 +124,25 @@ class DocumentStore:
 
         self._repository.set_in_trash(block_ids, in_trash=in_trash, cascade=True)
 
-    def get_block(self, block_id: UUID, *, depth: int | None = 0) -> Block | None:
+    def get_block(
+        self,
+        block_id: UUID,
+        *,
+        depth: int | None = 0,
+        include_trashed: bool = False,
+    ) -> Block | None:
         """Fetch an individual block via the store."""
-        return self._repository.get_block(block_id, depth=depth)
+        return self._repository.get_block(block_id, depth=depth, include_trashed=include_trashed)
 
     # ----------------------------------------------------------------- Helpers
-    def _require_block(self, block_id: UUID, *, depth: int | None = 0) -> Block:
-        block = self._repository.get_block(block_id, depth=depth)
+    def _require_block(
+        self,
+        block_id: UUID,
+        *,
+        depth: int | None = 0,
+        include_trashed: bool = False,
+    ) -> Block:
+        block = self._repository.get_block(block_id, depth=depth, include_trashed=include_trashed)
         if block is None:
             raise DocumentStoreError(f"Block {block_id} does not exist.")
         return block

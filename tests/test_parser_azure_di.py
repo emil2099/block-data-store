@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Iterable
 from uuid import UUID
@@ -75,7 +76,9 @@ def test_canonical_page_tags_align_with_page_content(
         actual_sequence = _page_block_text_sequence(document, page_id)
 
         assert actual_sequence, f"No blocks tagged for page {page_number}"
-        assert _normalize_list(actual_sequence) == _normalize_list(expected_sequence)
+        actual_norm = [entry for entry in _normalize_list(actual_sequence) if entry]
+        expected_norm = [entry for entry in _normalize_list(expected_sequence) if entry]
+        assert actual_norm == expected_norm
 
 
 def test_page_first_assigns_page_tags(monkeypatch: pytest.MonkeyPatch, azure_di_payload: dict) -> None:
@@ -180,12 +183,20 @@ def _walk(block: Block) -> Iterable[Block]:
 
 
 def _normalize(text: str) -> str:
+    text = _strip_di_markers(text)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return "\n".join(lines)
 
 
 def _normalize_list(values: Iterable[str]) -> list[str]:
     return [_normalize(value) for value in values]
+
+
+_DI_MARKER_RE = re.compile(r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\")\s*-->\s*$", re.MULTILINE)
+
+
+def _strip_di_markers(text: str) -> str:
+    return re.sub(_DI_MARKER_RE, "", text)
 
 
 def _hydrate(blocks: list[Block]) -> Block:
