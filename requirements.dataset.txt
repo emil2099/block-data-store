@@ -1,0 +1,5 @@
+# Optional dependencies for the dataset parser
+# Install with: pip install -r requirements.dataset.txt
+
+pandas>=2.0.0
+openpyxl>=3.1.0
