@@ -1,9 +1,10 @@
 sqlalchemy
 mistune
 pydantic
-ipykernel
 pytest
 python-dotenv
 psycopg2-binary
 nbformat
+
+ipykernel
 nicegui

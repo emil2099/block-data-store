@@ -2,4 +2,6 @@
 # Install with: pip install -r requirements.dataset.txt
 
 pandas>=2.0.0
-openpyxl>=3.1.0
+
+# Uncomment if Excel ingestion is needed
+# openpyxl>=3.1.0
