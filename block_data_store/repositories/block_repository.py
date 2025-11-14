@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 from uuid import UUID
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from block_data_store.db.schema import DbBlock
@@ -67,6 +68,9 @@ class BlockRepository:
             if depth == 0:
                 return self._with_resolvers(self._to_model(db_row))
 
+            if depth is None:
+                return self._hydrate_full_root(session, db_row, include_trashed)
+
             cache: dict[UUID, Block] = {}
             self._hydrate_subgraph(
                 session,
@@ -111,11 +115,16 @@ class BlockRepository:
         if not blocks:
             return
 
+        payloads = [self._to_record(block) for block in blocks]
+
         with self._session_factory() as session:
-            for block in blocks:
-                payload = self._to_record(block)
-                session.merge(DbBlock(**payload))
-            session.commit()
+            bind = session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                self._bulk_upsert_postgres(session, payloads)
+            else:
+                for payload in payloads:
+                    session.merge(DbBlock(**payload))
+                session.commit()
 
     def set_in_trash(
         self,
@@ -480,6 +489,23 @@ class BlockRepository:
                 include_trashed=include_trashed,
             )
 
+    def _hydrate_full_root(
+        self,
+        session: Session,
+        root_row: DbBlock,
+        include_trashed: bool,
+    ) -> Block | None:
+        query = session.query(DbBlock).filter(DbBlock.root_id == root_row.root_id)
+        if not include_trashed:
+            query = query.filter(DbBlock.in_trash.is_(False))
+        rows = query.all()
+        cache: dict[UUID, Block] = {}
+        for row in rows:
+            block = self._to_model(row)
+            cache[block.id] = block
+        wired_cache = self._wire_cache(cache)
+        return wired_cache.get(UUID(root_row.id))
+
     def _wire_cache(self, cache: dict[UUID, Block]) -> dict[UUID, Block]:
         """Attach shared resolvers to a cached block subgraph."""
         if not cache:
@@ -513,6 +539,21 @@ class BlockRepository:
             )
 
         return wired_cache
+
+    def _bulk_upsert_postgres(self, session: Session, payloads: list[dict[str, Any]]) -> None:
+        if not payloads:
+            return
+
+        stmt = pg_insert(DbBlock).values(payloads)
+        update_cols = {
+            column.name: getattr(stmt.excluded, column.name)
+            for column in DbBlock.__table__.columns
+            if column.name != "id"
+        }
+        session.execute(
+            stmt.on_conflict_do_update(index_elements=[DbBlock.id], set_=update_cols)
+        )
+        session.commit()
 
     def _collect_descendant_ids(self, session: Session, root_ids: Iterable[str]) -> set[str]:
         """Return every descendant id reachable from ``root_ids`` (including the roots)."""

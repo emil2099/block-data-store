@@ -8,6 +8,21 @@ This document summarises optimisation opportunities, orders them by impact, and 
 
 ## Prioritised Opportunities
 
+### Update — November 2025
+
+We implemented two of the high-impact items above while chasing Cosmos Postgres performance regressions:
+
+1. **Bulk Postgres upsert** — `BlockRepository.upsert_blocks` now batches every payload in a single `INSERT ... ON CONFLICT DO UPDATE` when the active dialect reports `postgresql`. SQLite still uses `session.merge` for compatibility. This eliminates the per-block round trip that previously made markdown ingestion scale linearly with latency.
+2. **Full-root hydration** — `get_block(..., depth=None)` no longer walks the tree recursively issuing child queries. Instead, it loads all rows sharing the same `root_id` in one query and wires them in-memory. This mirrors the recursive CTE idea from opportunity #3 with minimal ORM surgery.
+
+**Trade-offs / risks:**
+
+- The Postgres-specific upsert bypasses SQLAlchemy's identity map, so hooks (`before_update`, `after_insert`) won't fire. If we add such hooks later, we must revisit `_bulk_upsert_postgres` or gate it behind a feature flag.
+- Bulk fetching an entire root loads every block into memory; extremely large documents could consume significant RAM. We should consider a streaming/iterative hydrator or depth-aware batching if documents exceed a few thousand blocks.
+- Non-Postgres dialects still use `session.merge`, so cross-database performance remains uneven until we introduce SQLite or generic bulk paths.
+
+Keep these caveats in mind when extending the repository or moving more logic into the bulk paths.
+
 ### 1. **Shared Filtering & Visibility Helpers (High Impact / Low Effort)**
 - **Problem:** `get_block` and `query_blocks` repeat the same structural filter plumbing (`root`, `parent`, `where`, `property_filter`) and visibility joins.
 - **Opportunity:** Centralise the CTE/visibility logic and DSL application (e.g., `_visible_cte`, `_apply_filters`, `_apply_related_filters`).

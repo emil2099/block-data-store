@@ -11,7 +11,10 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import logging
 import os
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +30,25 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv(PROJECT_ROOT / ".env")
+
+LOG_LEVEL = os.getenv("BDS_DEMO_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(message)s")
+LOGGER = logging.getLogger("block_data_store.demo")
+
+
+@contextmanager
+def log_duration(label: str):
+    start = time.perf_counter()
+    LOGGER.info("▶ %s", label)
+    try:
+        yield
+    except Exception:
+        elapsed = time.perf_counter() - start
+        LOGGER.exception("✖ %s failed after %.2fs", label, elapsed)
+        raise
+    else:
+        elapsed = time.perf_counter() - start
+        LOGGER.info("✓ %s completed in %.2fs", label, elapsed)
 
 from block_data_store.db.engine import create_engine, create_session_factory
 from block_data_store.db.schema import Base, create_all
@@ -303,79 +325,94 @@ def _build_property_filter_from_inputs(
 
 
 def _bootstrap_state(engine) -> AppState:
-    create_all(engine)
-    session_factory = create_session_factory(engine)
-    store = create_document_store(session_factory)
-    renderer = MarkdownRenderer()
-    state = AppState(store=store, renderer=renderer)
-    _seed_documents(state)
-    return state
+    with log_duration("bootstrap_state"):
+        create_all(engine)
+        session_factory = create_session_factory(engine)
+        store = create_document_store(session_factory)
+        renderer = MarkdownRenderer()
+        state = AppState(store=store, renderer=renderer)
+        _seed_documents(state)
+        return state
 
 
 def _seed_documents(state: AppState) -> None:
-    if state.store.list_documents():
-        pass
-    else:
-        for path in sorted(SAMPLE_DATA_DIR.glob("*.md")):
-            blocks = load_markdown_path(path)
-            blocks = _attach_source_metadata(blocks, path.name)
-            state.store.save_blocks(blocks)
-    _seed_sample_pdfs(state)
-    _seed_sample_dataset(state)
+    with log_duration("seed.documents"):
+        documents = state.store.list_documents()
+        if documents:
+            LOGGER.info("Seed skipped: %d documents already present", len(documents))
+        else:
+            markdown_paths = sorted(SAMPLE_DATA_DIR.glob("*.md"))
+            LOGGER.info("Seeding %d markdown files", len(markdown_paths))
+            for path in markdown_paths:
+                with log_duration(f"seed.markdown::{path.name}"):
+                    blocks = load_markdown_path(path)
+                    blocks = _attach_source_metadata(blocks, path.name)
+                    state.store.save_blocks(blocks)
+        _seed_sample_pdfs(state)
+        _seed_sample_dataset(state)
 
 
 def _seed_sample_pdfs(state: AppState) -> None:
-    try:
-        import azure.ai.documentintelligence  # noqa: F401
-    except Exception:
-        print("[demo] azure-ai-documentintelligence not installed; skipping PDF seed")
-        return
-
-    for path in SAMPLE_PDFS:
-        if not path.exists():
-            continue
-        marker = f"seed::pdf::{path.name}"
-        existing = state.store.list_documents()
-        if any((doc.metadata or {}).get("demo_seed") == marker for doc in existing):
-            continue
+    with log_duration("seed.pdfs"):
         try:
-            with path.open("rb") as handle:
-                blocks = azure_di_to_blocks(handle)
-        except Exception as exc:
-            print(f"[demo] Azure DI seed failed for {path.name}: {exc}")
-            continue
-        blocks = _attach_source_metadata(blocks, path.name)
-        root = blocks[0]
-        metadata = dict(root.metadata)
-        metadata["demo_seed"] = marker
-        blocks[0] = root.model_copy(update={"metadata": metadata})
-        state.store.save_blocks(blocks)
+            import azure.ai.documentintelligence  # noqa: F401
+        except Exception:
+            LOGGER.info("Azure DI not installed; skipping PDF seed")
+            return
+
+        for path in SAMPLE_PDFS:
+            if not path.exists():
+                LOGGER.info("PDF seed skipped; file missing: %s", path.name)
+                continue
+            marker = f"seed::pdf::{path.name}"
+            existing = state.store.list_documents()
+            if any((doc.metadata or {}).get("demo_seed") == marker for doc in existing):
+                LOGGER.info("PDF %s already seeded", path.name)
+                continue
+            try:
+                with path.open("rb") as handle:
+                    blocks = azure_di_to_blocks(handle)
+            except Exception as exc:
+                LOGGER.warning("Azure DI seed failed for %s: %s", path.name, exc)
+                continue
+            blocks = _attach_source_metadata(blocks, path.name)
+            root = blocks[0]
+            metadata = dict(root.metadata)
+            metadata["demo_seed"] = marker
+            blocks[0] = root.model_copy(update={"metadata": metadata})
+            state.store.save_blocks(blocks)
+            LOGGER.info("Seeded PDF document: %s", path.name)
 
 
 def _seed_sample_dataset(state: AppState) -> None:
-    target = SAMPLE_DATASET
-    if not target.exists() and SAMPLE_DATASET_SOURCE.exists():
-        target.write_text(SAMPLE_DATASET_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
-    if not target.exists():
-        return
-    dataset_roots = [
-        block
-        for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
-        if block.parent_id is None
-    ]
-    if any((block.metadata or {}).get("demo_seed") == "seed::dataset" for block in dataset_roots):
-        return
-    try:
-        blocks = dataset_to_blocks(target)
-    except Exception as exc:
-        print(f"[demo] Dataset seed failed: {exc}")
-        return
-    blocks = _attach_source_metadata(blocks, target.name)
-    root = blocks[0]
-    metadata = dict(root.metadata)
-    metadata["demo_seed"] = "seed::dataset"
-    blocks[0] = root.model_copy(update={"metadata": metadata})
-    state.store.save_blocks(blocks)
+    with log_duration("seed.dataset"):
+        target = SAMPLE_DATASET
+        if not target.exists() and SAMPLE_DATASET_SOURCE.exists():
+            target.write_text(SAMPLE_DATASET_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
+            LOGGER.info("Copied dataset seed from fixture to %s", target.name)
+        if not target.exists():
+            LOGGER.info("Dataset seed skipped; file missing")
+            return
+        dataset_roots = [
+            block
+            for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
+            if block.parent_id is None
+        ]
+        if any((block.metadata or {}).get("demo_seed") == "seed::dataset" for block in dataset_roots):
+            LOGGER.info("Dataset already seeded; skipping")
+            return
+        try:
+            blocks = dataset_to_blocks(target)
+        except Exception as exc:
+            LOGGER.warning("Dataset seed failed: %s", exc)
+            return
+        blocks = _attach_source_metadata(blocks, target.name)
+        root = blocks[0]
+        metadata = dict(root.metadata)
+        metadata["demo_seed"] = "seed::dataset"
+        blocks[0] = root.model_copy(update={"metadata": metadata})
+        state.store.save_blocks(blocks)
+        LOGGER.info("Seeded dataset document from %s", target.name)
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +494,9 @@ def _create_demo_engine(database_choice: str):
         url = os.getenv("POSTGRES_TEST_URL") or os.getenv("DATABASE_URL")
         if not url:
             raise SystemExit("--database postgres requires DATABASE_URL or POSTGRES_TEST_URL to be set")
+        LOGGER.info("Connecting to Postgres at %s", url.split("@")[-1])
         return create_engine(connection_string=url)
+    LOGGER.info("Using SQLite database at %s", DB_PATH)
     return create_engine(sqlite_path=DB_PATH)
 
 
@@ -469,8 +508,10 @@ def _clear_database(engine) -> None:
             path = Path(db_path)
             if path.exists():
                 path.unlink()
+                LOGGER.info("Deleted SQLite file %s", path)
         return
     Base.metadata.drop_all(bind=engine)
+    LOGGER.info("Dropped all tables on %s", engine.url)
 
 
 def _format_block_details(block: Block) -> str:
@@ -563,7 +604,14 @@ def _load_document(state: AppState, document_id: str | None) -> None:
         return
 
     root_uuid = UUID(doc_value)
+    start = time.perf_counter()
     root_block = state.store.get_root_tree(root_uuid, depth=None, include_trashed=state.show_trashed)
+    LOGGER.info(
+        "Loaded document %s (depth=None, trashed=%s) in %.2fs",
+        doc_value,
+        state.show_trashed,
+        time.perf_counter() - start,
+    )
     state.block_cache[str(root_block.id)] = root_block
     state.documents_by_id[str(root_block.id)] = root_block
     tree_payload = [_build_tree(state.block_cache, root_block)]
@@ -583,34 +631,41 @@ def _load_document(state: AppState, document_id: str | None) -> None:
 
 
 def _refresh_documents(state: AppState, selected: str | None = None) -> None:
-    documents = state.store.list_documents()
-    dataset_roots = [
-        block
-        for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
-        if block.parent_id is None
-    ]
-    state.documents = documents + dataset_roots
-    state.documents_by_id = {str(doc.id): doc for doc in state.documents}
-    state.document_id_to_label = {
-        str(doc.id): _document_label(doc) for doc in state.documents
-    }
+    with log_duration("ui.refresh_documents"):
+        documents = state.store.list_documents()
+        dataset_roots = [
+            block
+            for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
+            if block.parent_id is None
+        ]
+        state.documents = documents + dataset_roots
+        state.documents_by_id = {str(doc.id): doc for doc in state.documents}
+        state.document_id_to_label = {
+            str(doc.id): _document_label(doc) for doc in state.documents
+        }
 
-    if state.document_select:
-        state.document_select.options = state.document_id_to_label
-        state.document_select.update()
+        LOGGER.info(
+            "Document refresh: %d canonical, %d dataset roots",
+            len(documents),
+            len(dataset_roots),
+        )
 
-    target_id = selected or state.selected_document_id
-    if target_id not in state.documents_by_id:
-        target_id = None
-    if target_id is None and state.document_id_to_label:
-        target_id = next(iter(state.document_id_to_label.keys()))
-
-    if state.document_select and target_id:
-        if state.document_select.value != target_id:
-            state.document_select.value = target_id
+        if state.document_select:
+            state.document_select.options = state.document_id_to_label
             state.document_select.update()
 
-    _load_document(state, target_id)
+        target_id = selected or state.selected_document_id
+        if target_id not in state.documents_by_id:
+            target_id = None
+        if target_id is None and state.document_id_to_label:
+            target_id = next(iter(state.document_id_to_label.keys()))
+
+        if state.document_select and target_id:
+            if state.document_select.value != target_id:
+                state.document_select.value = target_id
+                state.document_select.update()
+
+        _load_document(state, target_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1157,12 +1212,14 @@ def build_ui(state: AppState) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    engine = _create_demo_engine(args.database)
+    with log_duration("engine.create"):
+        engine = _create_demo_engine(args.database)
     if args.clear_db:
-        _clear_database(engine)
+        with log_duration("db.clear"):
+            _clear_database(engine)
     state = _bootstrap_state(engine)
     build_ui(state)
-    ui.run(title="Block Data Store POC Showcase")
+    ui.run(title="Block Data Store POC Showcase", reload=False)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
