@@ -793,10 +793,10 @@ def _set_trash_state(state: AppState, *, in_trash: bool) -> None:
         ui.notify("Cannot change trash state of the root block.", color="warning")
         return
     try:
-        state.store.set_in_trash([block.id], in_trash=in_trash, cascade=True)
+        state.store.set_in_trash([block.id], in_trash=in_trash)
     except Exception as exc:
         ui.notify(str(exc), color="negative")
-        return
+        raise
 
     state.block_cache = {}
     _load_document(state, state.selected_document_id)
