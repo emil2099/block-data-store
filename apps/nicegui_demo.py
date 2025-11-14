@@ -8,23 +8,28 @@ visitors can understand what is happening behind the scenes.
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 from uuid import UUID
 
 from nicegui import events, ui
+from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+load_dotenv(PROJECT_ROOT / ".env")
+
 from block_data_store.db.engine import create_engine, create_session_factory
-from block_data_store.db.schema import create_all
+from block_data_store.db.schema import Base, create_all
 from block_data_store.models.block import Block, BlockType, Content
 from block_data_store.parser import load_markdown_path, markdown_to_blocks
 from block_data_store.parser.azure_di_parser import azure_di_to_blocks
@@ -297,8 +302,7 @@ def _build_property_filter_from_inputs(
 # State bootstrapping
 
 
-def _bootstrap_state() -> AppState:
-    engine = create_engine(sqlite_path=DB_PATH)
+def _bootstrap_state(engine) -> AppState:
     create_all(engine)
     session_factory = create_session_factory(engine)
     store = create_document_store(session_factory)
@@ -430,6 +434,43 @@ def _render_document_markdown(state: AppState, document_block: Block | None = No
 
     rendered = state.renderer.render(document_block, options=options)
     state.document_markdown_view.set_content(rendered or "_(empty document)_")
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Block Data Store NiceGUI demo")
+    parser.add_argument(
+        "--database",
+        choices=("sqlite", "postgres"),
+        default="sqlite",
+        help="Choose backend: default SQLite file or Postgres via DATABASE_URL.",
+    )
+    parser.add_argument(
+        "--clear-db",
+        action="store_true",
+        help="Drop all tables before seeding demo content.",
+    )
+    return parser.parse_args(argv)
+
+
+def _create_demo_engine(database_choice: str):
+    if database_choice == "postgres":
+        url = os.getenv("POSTGRES_TEST_URL") or os.getenv("DATABASE_URL")
+        if not url:
+            raise SystemExit("--database postgres requires DATABASE_URL or POSTGRES_TEST_URL to be set")
+        return create_engine(connection_string=url)
+    return create_engine(sqlite_path=DB_PATH)
+
+
+def _clear_database(engine) -> None:
+    if engine.dialect.name == "sqlite":
+        db_path = engine.url.database
+        engine.dispose()
+        if db_path:
+            path = Path(db_path)
+            if path.exists():
+                path.unlink()
+        return
+    Base.metadata.drop_all(bind=engine)
 
 
 def _format_block_details(block: Block) -> str:
@@ -1114,9 +1155,15 @@ def build_ui(state: AppState) -> None:
     _refresh_documents(state)
 
 
-state = _bootstrap_state()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_args(argv)
+    engine = _create_demo_engine(args.database)
+    if args.clear_db:
+        _clear_database(engine)
+    state = _bootstrap_state(engine)
+    build_ui(state)
+    ui.run(title="Block Data Store POC Showcase")
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    build_ui(state)
-    ui.run(title="Block Data Store POC Showcase")
+    main()
