@@ -46,11 +46,10 @@ def home_page() -> None:  # pragma: no cover - UI wiring
         ).classes("text-slate-600 w-full")
 
         with ui.row().classes("gap-3 flex-wrap"):
-            ui.button("Manage documents", on_click=lambda: ui.open("/documents"))
-            ui.button("View PDF pages", on_click=lambda: ui.open("/pdf"))
-            ui.button("Canonical tree explorer", on_click=lambda: ui.open("/tree"))
-            ui.button("Dataset explorer", on_click=lambda: ui.open("/datasets"))
+            ui.button("Manage documents", on_click=lambda: ui.navigate.to("/documents"))
+            ui.button("View PDF pages", on_click=lambda: ui.navigate.to("/pdf"))
+            ui.button("Canonical tree explorer", on_click=lambda: ui.navigate.to("/tree"))
+            ui.button("Dataset explorer", on_click=lambda: ui.navigate.to("/datasets"))
 
 
 __all__ = ["home_page"]
-

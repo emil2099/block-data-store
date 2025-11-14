@@ -29,9 +29,10 @@ def pdf_pages(request: Request) -> None:  # pragma: no cover - UI wiring
             ui.label("Upload a PDF via the Documents page to enable this view.").classes("text-slate-500")
             return
 
-        doc_options = {_doc_label(doc): str(doc.id) for doc in documents}
+        doc_options = {str(doc.id): _doc_label(doc) for doc in documents}
         query_doc = request.query_params.get("doc") if request else None
-        default_doc = query_doc if query_doc in doc_options.values() else next(iter(doc_options.values()))
+        available_values = list(doc_options.keys())
+        default_doc = query_doc if query_doc in available_values else (available_values[0] if available_values else None)
         page_area = ui.markdown("Select a page to render.").classes("w-full bg-white shadow-sm p-4 min-h-[240px]")
         pages_container = ui.row().classes("gap-2 flex-wrap")
 
@@ -68,7 +69,7 @@ def pdf_pages(request: Request) -> None:  # pragma: no cover - UI wiring
         ui.select(
             label="Select document",
             options=doc_options,
-            value=default_doc if doc_options else None,
+            value=default_doc,
             on_change=lambda e: load_document(e.value),
         ).classes("w-full")
 
@@ -79,7 +80,7 @@ def pdf_pages(request: Request) -> None:  # pragma: no cover - UI wiring
             ui.label("Page preview").classes("text-sm font-semibold text-slate-600 mt-4")
             page_area
 
-        if doc_options:
+        if default_doc:
             load_document(default_doc)
 
 

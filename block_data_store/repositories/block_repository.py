@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import date, datetime
+from pathlib import Path
 from typing import Iterable, Sequence
 from uuid import UUID
 
@@ -330,12 +333,13 @@ class BlockRepository:
 
     @staticmethod
     def _to_record(block: Block) -> dict[str, object]:
-        content_payload = block.content.model_dump() if block.content else None
-        properties_payload = (
-            block.properties.model_dump()
-            if hasattr(block.properties, "model_dump")
-            else block.properties
+        content_payload = (
+            block.content.model_dump(mode="json") if block.content else None
         )
+        if hasattr(block.properties, "model_dump"):
+            properties_payload = block.properties.model_dump(mode="json")
+        else:
+            properties_payload = _jsonable(block.properties)
         type_value = block.type.value if isinstance(block.type, BlockType) else str(block.type)
 
         return {
@@ -352,7 +356,7 @@ class BlockRepository:
             "created_by": str(block.created_by) if block.created_by else None,
             "last_edited_by": str(block.last_edited_by) if block.last_edited_by else None,
             "properties": properties_payload,
-            "metadata_json": block.metadata,
+            "metadata_json": _jsonable(block.metadata),
             "content": content_payload,
             "properties_version": block.properties_version,
         }
@@ -575,3 +579,21 @@ __all__ = [
     "InvalidChildrenError",
     "RepositoryError",
 ]
+
+
+def _jsonable(value):
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _jsonable(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    return value

@@ -45,17 +45,17 @@ def documents_page() -> None:  # pragma: no cover - UI wiring
         with ui.row().classes("gap-3 flex-wrap"):
             ui.upload(
                 label="Upload Markdown",
-                on_upload=lambda e: _after(_handle_markdown_upload(e, ctx.store), refresh_documents),
+                on_upload=lambda e: run.io_bound(_handle_markdown_upload, e, ctx.store, refresh_documents),
             ).props("accept=.md,text/markdown")
 
             ui.upload(
                 label="Upload PDF (Azure DI)",
-                on_upload=lambda e: _after(_handle_pdf_upload(e, ctx.store), refresh_documents),
+                on_upload=lambda e: run.io_bound(_handle_pdf_upload, e, ctx.store, refresh_documents),
             ).props("accept=application/pdf")
 
             ui.upload(
                 label="Upload CSV Dataset",
-                on_upload=lambda e: _after(_handle_dataset_upload(e, ctx.store), refresh_documents),
+                on_upload=lambda e: run.io_bound(_handle_dataset_upload, e, ctx.store, refresh_documents),
             ).props("accept=.csv,text/csv")
 
         ui.separator()
@@ -78,49 +78,51 @@ def _document_card(block: Block) -> None:
             if source:
                 ui.label(f"Source: {source}")
         with ui.row().classes("gap-2 mt-2"):
-            ui.button("Open in Tree", on_click=lambda _, doc_id=str(block.id): ui.open(f"/tree?doc={doc_id}"))
+            ui.button(
+                "Open in Tree",
+                on_click=lambda _, doc_id=str(block.id): ui.navigate.to(f"/tree?doc={doc_id}"),
+            )
             if (block.metadata or {}).get("source") == "azure_di":
-                ui.button("View pages", on_click=lambda _, doc_id=str(block.id): ui.open(f"/pdf?doc={doc_id}"),).props("outline")
+                ui.button(
+                    "View pages",
+                    on_click=lambda _, doc_id=str(block.id): ui.navigate.to(f"/pdf?doc={doc_id}"),
+                ).props("outline")
 
 
-def _handle_markdown_upload(event: events.UploadEvent, store) -> None:
+async def _handle_markdown_upload(event: events.UploadEventArguments, store, refresher) -> None:
     try:
-        content = event.content.read().decode("utf-8")
+        content = await event.file.text()
     except Exception as exc:  # pragma: no cover - user I/O
         ui.notify(f"Upload failed: {exc}", color="negative")
         return
     blocks = markdown_to_blocks(content)
     store.save_blocks(blocks)
     ui.notify(f"Stored Markdown document ({len(blocks)} blocks)", color="positive")
+    refresher()
 
 
-def _handle_pdf_upload(event: events.UploadEvent, store) -> None:
-    data = event.content.read()
+async def _handle_pdf_upload(event: events.UploadEventArguments, store, refresher) -> None:
     try:
+        data = await event.file.read()
         blocks = azure_di_to_blocks(io.BytesIO(data))
     except Exception as exc:  # pragma: no cover - optional dependency/runtime failures
         ui.notify(f"Azure DI parse failed: {exc}", color="negative")
         return
     store.save_blocks(blocks)
     ui.notify("Stored Azure DI document", color="positive")
+    refresher()
 
 
-def _handle_dataset_upload(event: events.UploadEvent, store) -> None:
-    data = event.content.read()
+async def _handle_dataset_upload(event: events.UploadEventArguments, store, refresher) -> None:
     try:
+        data = await event.file.read()
         blocks = dataset_to_blocks(io.BytesIO(data))
     except Exception as exc:  # pragma: no cover - optional dependency/runtime failures
         ui.notify(f"Dataset parse failed: {exc}", color="negative")
         return
     store.save_blocks(blocks)
     ui.notify("Stored dataset", color="positive")
-
-
-def _after(result, refresher) -> None:
-    """Run a refresh callback after an upload handler."""
-
     refresher()
-    return result
 
 
 __all__ = ["documents_page"]

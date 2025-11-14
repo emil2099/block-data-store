@@ -28,9 +28,9 @@ def tree_page(request: Request) -> None:  # pragma: no cover - UI wiring
             ui.label("No documents available.")
         return
 
-    doc_options = {_doc_label(doc): str(doc.id) for doc in documents}
+    doc_options = {str(doc.id): _doc_label(doc) for doc in documents}
     query_doc = request.query_params.get("doc") if request else None
-    default_value = query_doc if query_doc in doc_options.values() else next(iter(doc_options.values()))
+    default_value = query_doc if query_doc in doc_options else next(iter(doc_options), None)
     block_lookup: dict[str, Block] = {}
 
     with page_frame(
@@ -82,7 +82,7 @@ def tree_page(request: Request) -> None:  # pragma: no cover - UI wiring
             details_panel.set_content("Select a block to inspect.")
             preview_panel.set_content("Renderer preview will appear here.")
 
-        doc_select.on_change(lambda e: load_document(e.value))
+        doc_select.on_value_change(lambda e: load_document(e.value))
         load_document(doc_select.value)
 
 

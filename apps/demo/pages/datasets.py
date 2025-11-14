@@ -25,7 +25,7 @@ def datasets_page() -> None:  # pragma: no cover - UI wiring
         title="Dataset Explorer",
         subtitle="Upload CSV sources and preview dataset blocks rendered as tables.",
     ):
-        dataset_select = ui.select(label="Dataset", options={}, on_change=None).classes("w-full")
+        dataset_select = ui.select(label="Dataset", options=[]).classes("w-full")
         table_preview = ui.markdown("Upload a dataset to render its table.").classes("bg-white shadow-sm p-4 w-full")
         record_preview = ui.code("{}", language="json").classes("w-full")
 
@@ -35,11 +35,12 @@ def datasets_page() -> None:  # pragma: no cover - UI wiring
                 for block in ctx.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
                 if block.parent_id is None
             ]
-            options = { _dataset_label(block): str(block.id) for block in roots }
+            options = {str(block.id): _dataset_label(block) for block in roots}
             dataset_select.options = options
             dataset_select.update()
             if options:
-                dataset_select.value = next(iter(options.values()))
+                first_value = next(iter(options.keys()))
+                dataset_select.value = first_value
                 dataset_select.update()
                 load_dataset(dataset_select.value)
             else:
@@ -58,7 +59,7 @@ def datasets_page() -> None:  # pragma: no cover - UI wiring
             first = records[0].content.data if records and records[0].content else {}
             record_preview.set_content(json.dumps(first or {}, indent=2))
 
-        dataset_select.on_change(lambda e: load_dataset(e.value))
+        dataset_select.on_value_change(lambda e: load_dataset(e.value))
 
         with ui.row().classes("gap-3 flex-wrap mt-4"):
             ui.upload(
@@ -93,4 +94,3 @@ def _dataset_label(block) -> str:
 
 
 __all__ = ["datasets_page"]
-

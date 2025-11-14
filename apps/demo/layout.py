@@ -18,7 +18,7 @@ _NAV_LINKS = [
 def _nav_bar(current: str) -> None:
     with ui.header().classes("bg-slate-900 text-white shadow-sm"):
         with ui.row().classes("w-full items-center justify-between px-6 py-3"):
-            ui.link("Block Data Store Demo", "/").classes(
+            ui.link(text="Block Data Store Demo", target="/").classes(
                 "text-lg font-semibold no-underline text-white"
             )
             with ui.row().classes("gap-4"):
@@ -27,7 +27,9 @@ def _nav_bar(current: str) -> None:
                     classes = "text-white no-underline"
                     if not is_current:
                         classes = "text-white/70 hover:text-white no-underline"
-                    ui.link(label, href).classes(classes + (" font-semibold" if is_current else ""))
+                    ui.link(text=label, target=href).classes(
+                        classes + (" font-semibold" if is_current else "")
+                    )
 
 
 @contextmanager
@@ -51,10 +53,9 @@ def stat_card(label: str, value: str, *, href: str | None = None) -> None:
     with ui.card().classes("p-4 min-w-[180px] bg-white shadow-sm"):
         ui.label(value).classes("text-3xl font-semibold text-slate-900")
         if href:
-            ui.link(label, href).classes("text-slate-500 no-underline hover:underline")
+            ui.link(text=label, target=href).classes("text-slate-500 no-underline hover:underline")
         else:
             ui.label(label).classes("text-slate-500")
 
 
 __all__ = ["page_frame", "stat_card"]
-
