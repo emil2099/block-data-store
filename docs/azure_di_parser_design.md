@@ -1,104 +1,102 @@
-# **Azure Document Intelligence Parser Design**
+# Azure Document Intelligence Parser Design
 
-Version: 0.1  
-Status: Draft
+## **1. Purpose**
 
-## **1\. Purpose**
+This document defines the design for integrating Microsoft Azure Document Intelligence (DI) as an optional parser. The goal is to convert source documents (like PDFs) into the Decipher Block model, correctly handling page information while keeping the core application lightweight and extensible.
 
-Define how we integrate Microsoft Azure Document Intelligence (DI) as an optional parser that converts PDFs into our block model while keeping the core package lightweight. The design captures today's requirement (Markdown-mode extraction) and anticipates future needs (images, multi-modal chunks, alternative providers) without introducing new core abstractions.
+## **2. Goals & Non-Goals**
 
-## **2\. Goals & Non-Goals**
+### **Goals**
 
-**Goals**
-1. Keep Markdown parser as the only mandatory dependency; add Azure DI behind an optional install extra.
-2. Produce only blocks, with a single top-level `Document` root, consistent with existing parsers and store/renderer integration.
-3. When page information is available, construct page group blocks using existing types and tag content blocks via `properties.groups` (no new result objects, no secondary data structures outside the block graph).
-4. Support deterministic, offline tests plus opt-in integration tests that call the Azure API using developer-provided credentials.
-5. Provide fixtures (sample PDF + per-page Markdown) so we can validate parser behavior without hitting Azure.
+1. Keep the existing Markdown parser as the only mandatory dependency; add Azure DI behind an optional install extra (`extras_require`).
+2. Produce a `list[Block]` with a single top-level `Document` root, consistent with the existing parser contract.
+3. Provide an option to create page group blocks and tag content blocks with page membership, using the established "inverted tags" model from `decipher_block_grouping_model.md`.
+4. Ensure the design is testable with both fast, offline fixtures and opt-in integration tests that call the live Azure API.
 
-**Non-Goals**
-1. Implement binary/image extraction in v1 (but keep hooks open).
-2. Support multiple provider backends simultaneously—Docling etc. will follow the same extension pattern but are out of scope here.
+### **Non-Goals**
 
-## **3\. High-Level Architecture**
+1. Implement binary or image extraction in this version.
+2. Support multiple backend providers simultaneously; other providers can follow this same extension pattern in the future.
 
-```
-PDF bytes ──► Azure DI (markdown mode)
-            │
-            └─► (optionally) page-level metadata
-                       │
-                       ▼
-        AzureDiParser (optional extra)
-            │
-            └─► list[Block] with one Document root, canonical content blocks, and page grouping blocks
-```
+## **3. High-Level Architecture & Core Logic**
 
-### 3.1 Parser Contract (No New Types)
-- Match current architecture: parsers return `list[Block]` where index 0 is the `Document` root.
-- The Azure DI parser MUST build the canonical content using our existing Markdown parser and append additional group blocks under the same `root_id`.
-- Any diagnostics or raw DI payloads are optional and, if needed later, can be attached as `metadata` on relevant blocks (not via a new return type).
+The parser will be exposed through a primary function that takes the source document and an optional flag to control the creation of page groups.
 
-### 3.2 Optional Dependency Wiring
-- Package exposes `extras_require={"azure_di": ["azure-ai-formrecognizer>=...","python-dotenv>=..."]}`.
-- Import guards in `block_data_store/parser/azure_di.py`; raising a clear `ImportError` with guidance when the extra is missing.
-- Parser registration happens lazily (e.g., `register_parser("azure_di", AzureDiParser)` in module import guard).
+`parse(document_stream, *, create_page_groups: bool = True, ...)`
 
-## **4\. Page Group Modeling**
+### **3.1. Logic for `create_page_groups=True` (Default Behavior)**
 
-This design extends the "inverted tags" approach from `decipher_block_grouping_model.md`.
+This mode generates a full block graph with page groupings. It follows a pragmatic **"Page-First"** model for simplicity and speed of implementation.
 
-1. **Group Anchors**
-   - Use existing types: `GroupIndexBlock(group_index_type="page")` under the document root; each physical page becomes a `PageGroupBlock` child (ordered as encountered).
-   - Future chunking strategies can add a separate `GroupIndexBlock(group_index_type="chunk")` if/when needed. We are not assuming any DI-specific chunk shape now.
+1. **Single API Call:** Make one call to the Azure DI service to retrieve the complete `AnalyzeResult` object for the entire document. This object contains both the full-document Markdown content and the metadata for each page, including character `spans`.
+2. **Create Group Anchors:** Iterate through the `result.pages` list from the API response. For each page, create a `PageGroupBlock` and store its UUID in an in-memory map (e.g., `{page_number: page_uuid}`). These will all be children of a single `GroupIndexBlock`.
+3. **Process Content Page by Page:** Loop through `result.pages` again. In each iteration:
+a. Get the current page number and its corresponding `page_uuid` from the map.
+b. Use the `page.spans` to **slice** the page-specific Markdown content out of the master `result.content` string.
+c. Pass this page-specific Markdown snippet to the existing, unmodified Markdown-to-Block parser.
+d. For **every block** returned by the parser for this page, add the current `page_uuid` to its `properties.groups` list.
+4. **Consolidate and Return:** Collect the blocks from all pages into a single list, ensuring there is one `Document` root, and return the complete list.
 
-2. **Content Tagging**
-   - The parser uses the existing `groups: list[UUID]` property on content blocks (e.g., Heading, Paragraph, List Items, Table, Quote, Code, Html) to tag membership in page groups.
-   - If a single content block spans multiple pages, it carries multiple page IDs. We are not specifying how the mapping is derived; that depends on DI metadata reviewed at implementation time.
+### **3.2. Logic for `create_page_groups=False`**
 
-3. **Secondary Tree (Within Block Graph)**
-   - Page grouping blocks are regular blocks in the same graph (same `root_id`). They do not parent canonical content; they only anchor ordering and metadata for pages.
-   - We only commit to `page_number` for now. Additional attributes (e.g., coordinates, spans, file references) can be added later if required, as properties or metadata.
+This mode provides a faster, simpler parse when only the canonical content is needed.
 
-## **5\. Testing Strategy**
+1. **Single API Call:** Make one call to the Azure DI service to retrieve the `AnalyzeResult`.
+2. **Extract Full Markdown:** Get the complete `result.content` string, which represents the entire document.
+3. **Parse Entire Document:** Pass the full Markdown string to the existing Markdown-to-Block parser in a single pass.
+4. **Return Blocks:** Return the resulting `list[Block]`. No `GroupIndexBlock`, `PageGroupBlock`, or `properties.groups` tags will be created.
 
-### 5.1 Fast Suite (default `pytest`)
-- Add `tests/samples/pdf/{two_page.pdf, docid-page-01.md, docid-page-02.md}`.
-- Create fixtures that load the expected per-page Markdown and compare it to the parser’s secondary tree rendering (without any API calls).
-- Validate:
-  - Canonical Markdown round-trip still passes via existing renderer.
-  - Page grouping metadata aligns with sample expectations.
+## **4. Implementation Strategy & Trade-offs**
 
-### 5.2 Integration Suite (opt-in)
-- Mark tests hitting Azure with `@pytest.mark.azure_di`.
-- Require explicit invocation (`pytest -m azure_di --env-file .env.azure`).
-- Use `python-dotenv` (loaded in fixture) so credentials come from `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`, etc.
-- Tests assert live Azure responses match stored Markdown/metadata to detect regressions.
+### **4.1. V1 Strategy: Pragmatic "Page-First" Model**
 
-### 5.3 CI Considerations
-- Default CI runs skip Azure tests automatically.
-- Provide documentation snippet showing how to run integration tests locally and in gated pipelines (e.g., set `RUN_AZURE_DI_TESTS=1`).
+The initial implementation will use the "Page-First" model described in section 3.1. This approach is prioritized for its simplicity, as it leverages the existing Markdown parser without modification and avoids the complexity of character-level source mapping.
 
-## **6\. Configuration & Secrets**
+### **4.2. Acknowledged Trade-off: Split Blocks**
 
-- Configuration object (`AzureDiConfig`) holds endpoint, key, API version, model selection (markdown mode).
-- Load order:
-  1. Direct kwargs (explicit in code/tests).
-  2. Environment variables.
-  3. `.env` files (optional helper for dev).
+The primary trade-off of the "Page-First" model is that it will split semantic blocks that span a physical page break. For example, a single paragraph that starts on page one and ends on page two will be ingested as **two separate `ParagraphBlock`s**. The first will be tagged with page one, and the second with page two.
 
-## **7\. Future Extensions**
+This is a conscious and acceptable trade-off for the initial version. The impact of this will be evaluated against real-world documents.
 
-| Area | Potential Change | Notes |
-| --- | --- | --- |
-| Images | Add optional attachment blocks referencing blob storage or inline base64 data. | Requires renderer updates. |
-| Alternate Providers | Reuse parser pattern; place providers under separate extras and return plain `list[Block]`. | Ensure shared fixtures where possible. |
-| Chunking Strategies | Allow configurable chunk builders (page-based vs. semantic). | Could emit multiple grouping indexes per document. |
+### **4.3. Future Evolution: "Canonical-First" Model**
 
-## **8\. Open Questions**
+The impact of the "split block" issue will be assessed with a test harness of representative documents. If the issue is found to be significant for downstream use cases (like AI chunking or semantic analysis), the parser may be evolved to a more robust **"Canonical-First"** model in a future iteration. This would involve using a parser capable of generating source maps (character offsets) to build a perfect canonical tree first, and then applying page tags in a second pass.
 
-1. **Pagination fidelity:** Do we capture bounding boxes now, or defer until visual renderers need them?
-2. **Raw payloads:** Do we persist full DI JSON as block metadata or external artifact?
-3. **Error handling:** On partial failures, do we save anything or abort the whole parse?
-4. **Versioning:** How do we record parser/DI model versions (e.g., as document/root metadata)?
+## **5. Caching Strategy**
 
-These questions will be resolved during implementation planning; this doc serves as the guiding reference for scope and architecture.  
+To improve performance and reduce operational costs, a caching layer is strongly recommended.
+
+- **What to Cache:** The serialized `AnalyzeResult` object returned from the Azure DI API call. Caching this raw output allows for re-parsing with updated internal logic without making another expensive API call.
+- **Cache Key:** A deterministic hash (e.g., SHA-256) of the **source document's binary content**. This ensures that any change to the input document invalidates the cache.
+- **Workflow:** Before calling the API, the parser should check the cache using the content hash. On a cache hit, it deserializes the stored `AnalyzeResult` and proceeds. On a miss, it calls the API and stores the new result in the cache before proceeding.
+
+## **6. Page Group Modeling**
+
+The design will adhere to the "inverted tags" approach from `decipher_block_grouping_model.md`.
+
+- **Group Anchors:** A single `GroupIndexBlock(group_index_type="page")` will be created under the document root. Each physical page will be represented by a `PageGroupBlock` child of this index.
+- **Content Tagging:** The `properties.groups: list[UUID]` field on content blocks will be populated with the UUIDs of the `PageGroupBlock`(s) they belong to.
+
+## **7. Testing Strategy**
+
+A two-tiered testing approach will be used:
+
+1. **Fast Suite (Default):** Unit tests will use stored fixtures (e.g., a sample PDF and its expected per-page Markdown output) to validate the parser's block generation and tagging logic without making any live API calls.
+2. **Integration Suite (Opt-in):** Tests marked with `@pytest.mark.azure_di` will make live calls to the Azure DI service. These tests will require developer-provided credentials (via environment variables) and will be skipped in default CI runs.
+
+## **8. Configuration & Secrets**
+
+A dedicated configuration object (e.g., `AzureDiConfig`) will manage settings. Credentials (`AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`) will be loaded from environment variables or `.env` files, following standard practice.
+
+## **9. Open Questions & Resolutions**
+
+- **Handling Split Blocks:**
+    - **Resolution:** For V1, the simpler "Page-First" model will be implemented, which splits blocks across page breaks. This is a known trade-off. The impact will be evaluated with real documents to determine if a more complex "Canonical-First" model is needed in the future.
+- **Pagination Fidelity (Bounding Boxes):**
+    - **Resolution:** Defer. Capturing bounding boxes is not required for the initial implementation. They can be added to block `metadata` in the future if a visual rendering use case emerges.
+- **Raw API Payloads:**
+    - **Resolution:** Do not persist by default. The full JSON payload from DI can be voluminous. The implementation may include a temporary, configurable option to log this payload or attach it to the root block's `metadata` for debugging purposes.
+- **Error Handling:**
+    - **Resolution:** Abort the entire parse on partial failures from the API to prevent data corruption.
+- **Versioning:**
+    - **Resolution:** The parser should record the DI model version used (e.g., `prebuilt-layout@2023-10-31-preview`) in the `metadata` field of the root `DocumentBlock` for traceability.

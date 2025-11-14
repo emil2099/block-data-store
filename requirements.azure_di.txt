@@ -1,0 +1,9 @@
+# Optional dependencies for Azure Document Intelligence parser
+# Install with: pip install -r requirements.azure_di.txt
+
+# Core SDK (brings azure-core)
+azure-ai-documentintelligence>=1.0.0
+
+# Optional: authenticate with DefaultAzureCredential instead of key (not used by default)
+# azure-identity>=1.15.0
+
