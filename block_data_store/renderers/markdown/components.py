@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
+from uuid import UUID
 
 from block_data_store.models.block import Block, BlockType, Content
 from block_data_store.renderers.base import RenderOptions, RendererComponent
@@ -251,17 +252,12 @@ class GenericComponent(BaseComponent):
 class PageGroupComponent(BaseComponent):
     def render_block(self, block: Block, ctx: RenderContext) -> str:
         root = _find_root(block)
-        ordered = _ordered_blocks(root)
+        projected = _project_group_forest(root, block.id)
+        if not projected:
+            return ""
         sections: list[str] = []
-        for candidate in ordered:
-            if candidate.id == block.id:
-                continue
-            groups = getattr(candidate.properties, "groups", None)
-            if not groups or block.id not in groups:
-                continue
-            if candidate.type in {BlockType.GROUP_INDEX, BlockType.PAGE_GROUP}:
-                continue
-            rendered = ctx.render_block(candidate)
+        for candidate in projected:
+            rendered = ctx.engine.render(candidate, options=ctx.options, **ctx.child_kwargs())
             if rendered.strip():
                 sections.append(rendered)
         return ctx.join(sections)
@@ -467,16 +463,66 @@ def _find_root(block: Block) -> Block:
         current = parent
 
 
-def _ordered_blocks(root: Block) -> list[Block]:
-    ordered: list[Block] = []
+def _has_group(block: Block, group_id: UUID) -> bool:
+    groups = getattr(block.properties, "groups", None)
+    if not groups:
+        return False
+    return group_id in groups
 
-    def walk(node: Block) -> None:
-        ordered.append(node)
+
+def _project_group_forest(root: Block, group_id: UUID) -> list[Block]:
+    clones: dict[UUID, Block] = {}
+    top_level_ids: list[UUID] = []
+
+    def build(node: Block, parent_clone: Block | None) -> Block | None:
+        include_self = _has_group(node, group_id)
+        current_parent = parent_clone
+        if include_self:
+            clone_parent_id = parent_clone.id if parent_clone else None
+            clone = node.model_copy(update={"parent_id": clone_parent_id, "children_ids": tuple()})
+            clones[clone.id] = clone
+            current_parent = clone
+
+        child_ids: list[UUID] = []
         for child in node.children():
-            walk(child)
+            child_clone = build(child, current_parent)
+            if include_self and child_clone is not None:
+                child_ids.append(child_clone.id)
 
-    walk(root)
-    return ordered
+        if include_self:
+            clone = clones[node.id]
+            clone = clone.model_copy(update={"children_ids": tuple(child_ids)})
+            clones[node.id] = clone
+            if parent_clone is None:
+                top_level_ids.append(clone.id)
+            return clone
+        return None
+
+    build(root, None)
+
+    if not clones:
+        return []
+
+    resolved = _attach_clone_resolvers(clones)
+    return [resolved[block_id] for block_id in top_level_ids if block_id in resolved]
+
+
+def _attach_clone_resolvers(clones: dict[UUID, Block]) -> dict[UUID, Block]:
+    resolved: dict[UUID, Block] = {}
+
+    def resolve_one(block_id: UUID | None) -> Block | None:
+        if block_id is None:
+            return None
+        return resolved.get(block_id)
+
+    def resolve_many(ids: Sequence[UUID]) -> list[Block]:
+        return [resolved[block_id] for block_id in ids if block_id in resolved]
+
+    for block_id, block in clones.items():
+        resolved_block = block.with_resolvers(resolve_one=resolve_one, resolve_many=resolve_many)
+        resolved[block_id] = resolved_block
+
+    return resolved
 
 
 DEFAULT_COMPONENTS: dict[BlockType, RendererComponent] = {

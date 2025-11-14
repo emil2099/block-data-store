@@ -393,3 +393,69 @@ def test_structural_blocks_render_empty_output(block_factory, block_type, proper
 
     renderer = MarkdownRenderer()
     assert renderer.render(block).strip() == ""
+
+
+def test_page_group_renderer_respects_tagged_blocks(block_factory):
+    doc_id = uuid4()
+    heading_id = uuid4()
+    paragraph_id = uuid4()
+    stray_paragraph_id = uuid4()
+    group_index_id = uuid4()
+    page_group_id = uuid4()
+
+    document = block_factory(
+        block_id=doc_id,
+        block_type=BlockType.DOCUMENT,
+        parent_id=None,
+        root_id=doc_id,
+        children_ids=(heading_id, group_index_id),
+        properties={"title": "Doc"},
+    )
+    heading = block_factory(
+        block_id=heading_id,
+        block_type=BlockType.HEADING,
+        parent_id=doc_id,
+        root_id=doc_id,
+        children_ids=(paragraph_id, stray_paragraph_id),
+        properties={"level": 2, "groups": [page_group_id]},
+        content=Content(plain_text="Tagged Heading"),
+    )
+    paragraph = block_factory(
+        block_id=paragraph_id,
+        block_type=BlockType.PARAGRAPH,
+        parent_id=heading_id,
+        root_id=doc_id,
+        properties={"groups": [page_group_id]},
+        content=Content(plain_text="Tagged paragraph."),
+    )
+    stray_paragraph = block_factory(
+        block_id=stray_paragraph_id,
+        block_type=BlockType.PARAGRAPH,
+        parent_id=heading_id,
+        root_id=doc_id,
+        content=Content(plain_text="Untagged content."),
+    )
+    group_index = block_factory(
+        block_id=group_index_id,
+        block_type=BlockType.GROUP_INDEX,
+        parent_id=doc_id,
+        root_id=doc_id,
+        children_ids=(page_group_id,),
+        properties={"group_index_type": "page"},
+    )
+    page_group = block_factory(
+        block_id=page_group_id,
+        block_type=BlockType.PAGE_GROUP,
+        parent_id=group_index_id,
+        root_id=doc_id,
+        properties={"page_number": 1},
+    )
+
+    blocks = _wire([document, heading, paragraph, stray_paragraph, group_index, page_group])
+    renderer = MarkdownRenderer()
+
+    output = renderer.render(blocks[page_group_id])
+
+    assert output.count("Tagged Heading") == 1
+    assert "Tagged paragraph." in output
+    assert "Untagged content." not in output

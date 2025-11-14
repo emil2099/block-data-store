@@ -192,7 +192,10 @@ def _normalize_list(values: Iterable[str]) -> list[str]:
     return [_normalize(value) for value in values]
 
 
-_DI_MARKER_RE = re.compile(r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\")\s*-->\s*$", re.MULTILINE)
+_DI_MARKER_RE = re.compile(
+    r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\"|PageFooter\s*=\s*\".*?\")\s*-->\s*$",
+    re.MULTILINE,
+)
 
 
 def _strip_di_markers(text: str) -> str:

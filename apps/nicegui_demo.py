@@ -459,11 +459,12 @@ def _select_block(state: AppState, block_id: str) -> None:
     if state.details_markdown:
         state.details_markdown.set_content(_format_block_details(block))
     if state.properties_area:
-        state.properties_area.value = json.dumps(block.properties.model_dump(), indent=2)
+        props_json = block.properties.model_dump(mode="json")
+        state.properties_area.value = json.dumps(props_json, indent=2)
     if state.metadata_area:
         state.metadata_area.value = json.dumps(block.metadata, indent=2)
     if state.data_area:
-        content_payload = block.content.model_dump() if block.content else {}
+        content_payload = block.content.model_dump(mode="json") if block.content else {}
         state.data_area.value = json.dumps(content_payload, indent=2)
 
     _render_block(state, block)
@@ -826,7 +827,7 @@ def _rerender_on_toggle(state: AppState) -> Callable[[events.ValueChangeEventArg
 
 
 def _build_sidebar(state: AppState) -> None:
-    with ui.column().style("width: 320px; min-width: 280px;").classes("gap-4 p-4 bg-slate-50 h-full"):
+    with ui.column().style("min-width: 280px; height: 100%;").classes("gap-4 p-4 bg-slate-50"):
         ui.markdown(SIDEBAR_HELP_MD).classes("text-sm text-slate-600")
 
         def handle_doc_change(event: events.ValueChangeEventArguments) -> None:
@@ -906,7 +907,7 @@ def _build_overview_section(state: AppState) -> None:
 
 
 def _build_document_snapshot_section(state: AppState) -> None:
-    with ui.expansion("2. Document Snapshot", value=True).classes("shadow-sm w-full").props("header-class=font-bold"):
+    with ui.expansion("2. Document Snapshot", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
         ui.markdown(DOCUMENT_PREVIEW_TEXT).classes("text-sm text-slate-600 w-full")
         ui.code(DOCUMENT_PREVIEW_CODE, language="python").classes(
             "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
@@ -917,7 +918,7 @@ def _build_document_snapshot_section(state: AppState) -> None:
 
 
 def _build_filters_section(state: AppState) -> None:
-    with ui.expansion("3. Repository Filters", value=True).classes("shadow-sm w-full").props("header-class=font-bold"):
+    with ui.expansion("3. Repository Filters", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
         ui.markdown(FILTERS_TEXT).classes("text-sm text-slate-600 pb-2 w-full")
         ui.code(FILTERS_CODE, language="python").classes(
             "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
@@ -1010,7 +1011,7 @@ def _build_filters_section(state: AppState) -> None:
 
 
 def _build_inspector_section(state: AppState) -> None:
-    with ui.expansion("4. Block Inspector", value=True).classes("shadow-sm w-full").props("header-class=font-bold"):
+    with ui.expansion("4. Block Inspector", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
         ui.markdown(INSPECTOR_TEXT).classes("text-sm text-slate-600 pb-2 w-full")
         ui.code(INSPECTOR_CODE, language="python").classes(
             "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
@@ -1053,7 +1054,7 @@ def _build_inspector_section(state: AppState) -> None:
 
 
 def _build_preview_section(state: AppState) -> None:
-    with ui.expansion("5. Renderer Preview", value=True).classes("shadow-sm w-full").props("header-class=font-bold"):
+    with ui.expansion("5. Renderer Preview", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
         ui.markdown(PREVIEW_TEXT).classes("text-sm text-slate-600 pb-2 w-full")
         ui.code(PREVIEW_CODE, language="python").classes(
             "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
@@ -1090,16 +1091,25 @@ def build_ui(state: AppState) -> None:
     with ui.header().classes("justify-between items-center"):
         ui.label("Block Data Store — POC Showcase").classes("text-lg font-semibold")
 
-    with ui.row().classes("w-full h-full gap-4"):
-        _build_sidebar(state)
+    splitter = (
+        ui.splitter(value=28, limits=(20, 60))
+        .classes("w-full border border-slate-200 rounded-lg bg-white")
+        .style("height: calc(100vh - 80px);")
+    )
 
-        with ui.column().classes("flex-1 gap-4"):
-            _build_upload_section(state)
-            _build_overview_section(state)
-            _build_document_snapshot_section(state)
-            _build_filters_section(state)
-            _build_inspector_section(state)
-            _build_preview_section(state)
+    with splitter.before:
+        with ui.scroll_area().classes("h-full w-full"):
+            _build_sidebar(state)
+
+    with splitter.after:
+        with ui.scroll_area().classes("h-full w-full"):
+            with ui.column().classes("gap-4 p-4").style("min-width: 0;"):
+                _build_upload_section(state)
+                _build_overview_section(state)
+                _build_document_snapshot_section(state)
+                _build_filters_section(state)
+                _build_inspector_section(state)
+                _build_preview_section(state)
 
     _refresh_documents(state)
 

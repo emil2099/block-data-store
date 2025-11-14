@@ -427,7 +427,9 @@ def _normalise_text(text: str) -> str:
 
 
 def _remove_marker_html_blocks(blocks: Sequence[Block]) -> list[Block]:
-    pattern = re.compile(r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\")\s*-->\s*$")
+    pattern = re.compile(
+        r"^\s*<!--\s*(PageBreak|PageNumber\s*=\s*\".*?\"|PageFooter\s*=\s*\".*?\")\s*-->\s*$"
+    )
     ids_to_remove: set[UUID] = set()
     for block in blocks:
         if block.type is BlockType.HTML and block.content and block.content.plain_text:
