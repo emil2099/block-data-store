@@ -42,6 +42,14 @@ from block_data_store.store import DocumentStore, create_document_store
 
 DB_PATH = Path(__file__).resolve().parent / "nicegui_demo.db"
 SAMPLE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+SAMPLE_PDFS = [
+    SAMPLE_DATA_DIR / "sample-local-pdf.pdf",
+    SAMPLE_DATA_DIR / "SYSC 4 General organisational requirements.pdf",
+]
+SAMPLE_DATASET = SAMPLE_DATA_DIR / "sample_dataset.csv"
+SAMPLE_DATASET_SOURCE = (
+    Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "datasets" / "sample_dataset.csv"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +172,7 @@ class AppState:
     show_trashed: bool = False
     documents: list[Block] = field(default_factory=list)
     documents_by_id: dict[str, Block] = field(default_factory=dict)
-    document_label_to_id: dict[str, str] = field(default_factory=dict)
+    document_id_to_label: dict[str, str] = field(default_factory=dict)
     selected_document_id: str | None = None
     selected_block_id: str | None = None
     block_cache: dict[str, Block] = field(default_factory=dict)
@@ -302,11 +310,68 @@ def _bootstrap_state() -> AppState:
 
 def _seed_documents(state: AppState) -> None:
     if state.store.list_documents():
+        pass
+    else:
+        for path in sorted(SAMPLE_DATA_DIR.glob("*.md")):
+            blocks = load_markdown_path(path)
+            blocks = _attach_source_metadata(blocks, path.name)
+            state.store.save_blocks(blocks)
+    _seed_sample_pdfs(state)
+    _seed_sample_dataset(state)
+
+
+def _seed_sample_pdfs(state: AppState) -> None:
+    try:
+        import azure.ai.documentintelligence  # noqa: F401
+    except Exception:
+        print("[demo] azure-ai-documentintelligence not installed; skipping PDF seed")
         return
-    for path in sorted(SAMPLE_DATA_DIR.glob("*.md")):
-        blocks = load_markdown_path(path)
+
+    for path in SAMPLE_PDFS:
+        if not path.exists():
+            continue
+        marker = f"seed::pdf::{path.name}"
+        existing = state.store.list_documents()
+        if any((doc.metadata or {}).get("demo_seed") == marker for doc in existing):
+            continue
+        try:
+            with path.open("rb") as handle:
+                blocks = azure_di_to_blocks(handle)
+        except Exception as exc:
+            print(f"[demo] Azure DI seed failed for {path.name}: {exc}")
+            continue
         blocks = _attach_source_metadata(blocks, path.name)
+        root = blocks[0]
+        metadata = dict(root.metadata)
+        metadata["demo_seed"] = marker
+        blocks[0] = root.model_copy(update={"metadata": metadata})
         state.store.save_blocks(blocks)
+
+
+def _seed_sample_dataset(state: AppState) -> None:
+    target = SAMPLE_DATASET
+    if not target.exists() and SAMPLE_DATASET_SOURCE.exists():
+        target.write_text(SAMPLE_DATASET_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
+    if not target.exists():
+        return
+    dataset_roots = [
+        block
+        for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))
+        if block.parent_id is None
+    ]
+    if any((block.metadata or {}).get("demo_seed") == "seed::dataset" for block in dataset_roots):
+        return
+    try:
+        blocks = dataset_to_blocks(target)
+    except Exception as exc:
+        print(f"[demo] Dataset seed failed: {exc}")
+        return
+    blocks = _attach_source_metadata(blocks, target.name)
+    root = blocks[0]
+    metadata = dict(root.metadata)
+    metadata["demo_seed"] = "seed::dataset"
+    blocks[0] = root.model_copy(update={"metadata": metadata})
+    state.store.save_blocks(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +421,7 @@ def _render_document_markdown(state: AppState, document_block: Block | None = No
         document_block = state.documents_by_id.get(document_id) or state.block_cache.get(document_id)
         if document_block is None:
             try:
-                document_block = state.store.get_root_tree(UUID(document_id), depth=None)
+                document_block = state.store.get_root_tree(UUID(document_id), depth=None, include_trashed=state.show_trashed)
             except Exception:
                 document_block = None
     if document_block is None:
@@ -484,28 +549,23 @@ def _refresh_documents(state: AppState, selected: str | None = None) -> None:
     ]
     state.documents = documents + dataset_roots
     state.documents_by_id = {str(doc.id): doc for doc in state.documents}
-    state.document_label_to_id = {
-        _document_label(doc): str(doc.id) for doc in state.documents
+    state.document_id_to_label = {
+        str(doc.id): _document_label(doc) for doc in state.documents
     }
 
-    labels = list(state.document_label_to_id.keys())
     if state.document_select:
-        state.document_select.options = labels
+        state.document_select.options = state.document_id_to_label
         state.document_select.update()
 
     target_id = selected or state.selected_document_id
     if target_id not in state.documents_by_id:
         target_id = None
-    if target_id is None and state.document_label_to_id:
-        target_id = next(iter(state.document_label_to_id.values()))
+    if target_id is None and state.document_id_to_label:
+        target_id = next(iter(state.document_id_to_label.keys()))
 
     if state.document_select and target_id:
-        target_label = next(
-            (label for label, doc_id in state.document_label_to_id.items() if doc_id == target_id),
-            None,
-        )
-        if target_label and state.document_select.value != target_label:
-            state.document_select.value = target_label
+        if state.document_select.value != target_id:
+            state.document_select.value = target_id
             state.document_select.update()
 
     _load_document(state, target_id)
@@ -770,18 +830,11 @@ def _build_sidebar(state: AppState) -> None:
         ui.markdown(SIDEBAR_HELP_MD).classes("text-sm text-slate-600")
 
         def handle_doc_change(event: events.ValueChangeEventArguments) -> None:
-            label = event.value if isinstance(event.value, str) else None
-            if not label:
-                _load_document(state, None)
-                return
-            block_id = state.document_label_to_id.get(label)
-            if block_id is None:
-                ui.notify("Unknown document label", color="negative")
-                return
+            block_id = event.value if isinstance(event.value, str) else None
             _load_document(state, block_id)
 
         state.document_select = ui.select(
-            options=[],
+            options={},
             label="Documents",
             on_change=handle_doc_change,
         ).props("outlined dense").classes("w-full")
