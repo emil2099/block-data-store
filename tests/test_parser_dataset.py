@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from uuid import UUID
 
 import pytest
 
 from block_data_store.models.block import Block, BlockType
+import block_data_store.parser.dataset_parser as dataset_parser
 from block_data_store.parser.dataset_parser import DatasetParserConfig, dataset_to_blocks
 from block_data_store.renderers import MarkdownRenderer
 
@@ -45,6 +46,32 @@ def test_dataset_parser_select_columns(sample_csv_path: Path) -> None:
     assert records
     for record in records:
         assert set(record.content.data.keys()) == {"name", "score"}
+
+
+def test_dataset_parser_sheet_name_passthrough(monkeypatch) -> None:
+    import pandas as pd
+
+    captured: dict[str, Any] = {}
+
+    class DummyPandas:
+        def read_excel(self, data_input, **kwargs):
+            captured["reader"] = "excel"
+            captured["kwargs"] = kwargs
+            return pd.DataFrame([{"name": "Alice"}])
+
+        def read_csv(self, data_input, **kwargs):
+            captured["reader"] = "csv"
+            captured["kwargs"] = kwargs
+            return pd.DataFrame([{"name": "Alice"}])
+
+    monkeypatch.setattr(dataset_parser, "_import_pandas", lambda: DummyPandas())
+
+    config = DatasetParserConfig(reader="excel", sheet_name="Sheet 2")
+    blocks = dataset_to_blocks(b"irrelevant", config=config)
+
+    assert blocks  # ensure parser returned something
+    assert captured["reader"] == "excel"
+    assert captured["kwargs"]["sheet_name"] == "Sheet 2"
 
 
 # ---------------------------------------------------------------------------

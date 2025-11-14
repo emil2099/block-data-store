@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import io
 from pathlib import Path
-from typing import IO, Any, Literal
+from typing import IO, Any, Literal, Sequence
 from uuid import UUID, uuid4
 
 from block_data_store.models.block import Block, Content
@@ -19,6 +19,7 @@ class DatasetParserConfig:
     title: str | None = None
     category: str | None = None
     data_schema: dict[str, Any] | None = None
+    sheet_name: str | int | Sequence[str | int] | None = None
     reader: Literal["auto", "csv", "excel"] = "auto"
     read_kwargs: dict[str, Any] = field(default_factory=dict)
 
@@ -132,6 +133,8 @@ def _load_dataframe(
 
     reader = _determine_reader(config.reader, path)
     kwargs = dict(config.read_kwargs)
+    if config.sheet_name is not None and "sheet_name" not in kwargs:
+        kwargs["sheet_name"] = config.sheet_name
 
     if reader == "excel":
         dataframe = pandas.read_excel(data_input, **kwargs)
