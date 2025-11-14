@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
+
+import pytest
 
 from block_data_store.models.block import BlockType
 from block_data_store.parser import markdown_to_blocks
 from block_data_store.renderers import MarkdownRenderer
 from block_data_store.store import DocumentStore
 
+_SAMPLES_DIR = Path(__file__).parent / "samples" / "markdown"
 
-def test_markdown_round_trip_document(document_store: DocumentStore):
-    source = "\n".join(
+
+def _handbook_source() -> str:
+    return "\n".join(
         [
             "# Team Handbook",
             "",
@@ -36,6 +41,30 @@ def test_markdown_round_trip_document(document_store: DocumentStore):
             "3. Improve",
         ]
     )
+
+
+def _load_markdown_samples() -> list[tuple[str, str]]:
+    samples: list[tuple[str, str]] = [("inline_handbook", _handbook_source())]
+    if _SAMPLES_DIR.exists():
+        for path in sorted(_SAMPLES_DIR.glob("*.md")):
+            samples.append((path.stem, path.read_text(encoding="utf-8").strip()))
+    return samples
+
+
+_ROUND_TRIP_SAMPLES = _load_markdown_samples()
+_ROUND_TRIP_SAMPLE_IDS = [sample_id for sample_id, _ in _ROUND_TRIP_SAMPLES]
+
+
+@pytest.mark.parametrize(
+    ("sample_id", "source"),
+    _ROUND_TRIP_SAMPLES,
+    ids=_ROUND_TRIP_SAMPLE_IDS,
+)
+def test_markdown_round_trip_document(
+    sample_id: str,
+    source: str,
+    document_store: DocumentStore,
+) -> None:
     blocks = markdown_to_blocks(source)
     document_store.save_blocks(blocks)
     document = document_store.get_root_tree(blocks[0].id, depth=None)
@@ -45,7 +74,8 @@ def test_markdown_round_trip_document(document_store: DocumentStore):
 
     assert output == source
 
-    _assert_block_shapes(document_store, document.id)
+    if sample_id == "inline_handbook":
+        _assert_block_shapes(document_store, document.id)
 
 
 def _assert_block_shapes(store: DocumentStore, document_id: UUID) -> None:
