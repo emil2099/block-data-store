@@ -1184,7 +1184,7 @@ def _toggle_recursive_preview(state: AppState, include_children: bool) -> None:
 
 
 def build_ui(state: AppState) -> None:
-    with ui.header().classes("justify-between items-center"):
+    with ui.header().classes("justify-between items-center p-2"):
         ui.label("Block Data Store — POC Showcase").classes("text-lg font-semibold")
 
     splitter = (
