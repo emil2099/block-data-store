@@ -1,0 +1,54 @@
+Metadata-Version: 2.4
+Name: block-data-store
+Version: 0.1.0
+Summary: Unified block-based content model for structured storage, filtering, and rendering.
+Author: Block Data Store Team
+License-Expression: LicenseRef-Proprietary
+Project-URL: Homepage, https://github.com/<owner>/block_data_store
+Project-URL: Source, https://github.com/<owner>/block_data_store
+Keywords: blocks,content-store,pydantic,sqlalchemy
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: sqlalchemy>=2.0
+Requires-Dist: pydantic>=2.0
+Requires-Dist: mistune>=3.0
+
+# Block Data Store
+
+Unified block-based content model with persistence, parsing, and rendering layers. Every document, section, paragraph, and dataset is represented as a typed block, making it easy to store, filter, and render structured content.
+
+## Install (from GitHub)
+
+```bash
+pip install git+https://github.com/<owner>/block_data_store.git
+```
+
+Replace `<owner>` with your GitHub org or username. Pin a tag or commit for reproducible installs, e.g.:
+
+```bash
+pip install "git+https://github.com/<owner>/block_data_store.git@v0.1.0"
+```
+
+## Quickstart
+
+```python
+from block_data_store.store import BlockDataStore
+
+store = BlockDataStore(database_url="sqlite:///block_store.db")
+store.create_all()
+```
+
+## Development
+
+- Clone the repo and create a virtualenv in `.venv`
+- Install dev deps: `pip install -r requirements.txt`
+- Run tests: `pytest`
+
+## Versioning
+
+The package uses semantic versions. Current release: `0.1.0`.

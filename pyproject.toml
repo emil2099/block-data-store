@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "block-data-store"
+version = "0.1.0"
+description = "Unified block-based content model for structured storage, filtering, and rendering."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "Block Data Store Team" }]
+keywords = ["blocks", "content-store", "pydantic", "sqlalchemy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "sqlalchemy>=2.0",
+    "pydantic>=2.0",
+    "mistune>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/emil2099/block_data_store"
+Source = "https://github.com/emil2099/block_data_store"
+
+[tool.setuptools.packages.find]
+include = ["block_data_store", "block_data_store.*"]
