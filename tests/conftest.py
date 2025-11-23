@@ -25,6 +25,15 @@ def postgres_url() -> str | None:
 def engine(postgres_url: str | None) -> Iterator[Engine]:
     """Yield an engine targeting Postgres when configured; otherwise SQLite in-memory."""
     engine = create_engine(postgres_url) if postgres_url else create_engine()
+    
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy import event
+        @event.listens_for(engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     create_all(engine)
     try:
         yield engine
@@ -68,6 +77,7 @@ def block_factory() -> Callable[..., Block]:
         properties=None,
         metadata=None,
         block_id=None,
+        workspace_id=None,
     ) -> Block:
         timestamp = datetime.now(timezone.utc)
         block_cls = block_class_for(block_type)
@@ -77,7 +87,7 @@ def block_factory() -> Callable[..., Block]:
             parent_id=parent_id,
             root_id=root_id,
             children_ids=tuple(children_ids),
-            workspace_id=None,
+            workspace_id=workspace_id,
             version=0,
             created_time=timestamp,
             last_edited_time=timestamp,

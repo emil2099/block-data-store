@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from block_data_store.models.block import Block, BlockType
+from block_data_store.models.relationship import Relationship
 from block_data_store.repositories.block_repository import BlockRepository
+from block_data_store.repositories.relationship_repository import RelationshipRepository
 from block_data_store.repositories.filters import (
     FilterExpression,
     ParentFilter,
@@ -22,9 +24,14 @@ class DocumentStoreError(RuntimeError):
 class DocumentStore:
     """Thin façade around the repository that coordinates multi-entity actions."""
 
-    def __init__(self, repository: BlockRepository):
+    def __init__(
+        self,
+        repository: BlockRepository,
+        relationship_repository: RelationshipRepository,
+    ):
         """Internal constructor; prefer ``create_document_store`` for public use."""
         self._repository = repository
+        self._relationship_repository = relationship_repository
 
     # ------------------------------------------------------------------ Queries
     def get_root_tree(
@@ -63,7 +70,29 @@ class DocumentStore:
             limit=limit,
         )
 
+    def get_relationships(
+        self,
+        block_id: UUID,
+        direction: str = "all",
+        include_trashed: bool = False,
+    ) -> list[Relationship]:
+        """Get relationships for a block."""
+        return self._relationship_repository.get_relationships(
+            block_id, direction=direction, include_trashed=include_trashed
+        )
+
     # ----------------------------------------------------------- Mutating ops
+    def upsert_relationships(self, relationships: Sequence[Relationship]) -> None:
+        """Batch insert or update relationships."""
+        self._relationship_repository.upsert_relationships(relationships)
+
+    def delete_relationships(
+        self,
+        keys: Sequence[tuple[UUID, UUID, str]],
+    ) -> bool:
+        """Batch delete relationships."""
+        return self._relationship_repository.delete_relationships(keys)
+
     def set_children(
         self,
         parent_id: UUID,

@@ -188,6 +188,34 @@ SIDEBAR_HELP_MD = """
 """
 
 
+RELATIONSHIPS_TEXT = """
+**Relationships (Graph Links)**
+
+- **Directional**: Links have a source and a target.
+- **Typed**: Links have a `rel_type` (e.g., "supports", "contradicts").
+- **Metadata**: Links can carry arbitrary JSON metadata.
+- **Batching**: Created and deleted in batches for performance.
+"""
+
+RELATIONSHIPS_CODE = """
+from block_data_store.models.relationship import Relationship
+
+# Create/Update
+rel = Relationship(
+    workspace_id=workspace_id,
+    source_block_id=source_id,
+    target_block_id=target_id,
+    rel_type="related",
+    metadata={"note": "Created via demo"}
+)
+store.upsert_relationships([rel])
+
+# Query
+outgoing = store.get_relationships(source_id, direction="outgoing")
+incoming = store.get_relationships(target_id, direction="incoming")
+"""
+
+
 # ---------------------------------------------------------------------------
 # Application state
 
@@ -214,6 +242,7 @@ class AppState:
     properties_area: Any | None = None
     metadata_area: Any | None = None
     data_area: Any | None = None
+    relationships_container: Any | None = None
     markdown_view: Any | None = None
     document_markdown_view: Any | None = None
     include_metadata_checkbox: Any | None = None
@@ -550,6 +579,7 @@ def _select_block(state: AppState, block_id: str) -> None:
         state.data_area.value = json.dumps(content_payload, indent=2)
 
     _render_block(state, block)
+    _refresh_relationships(state)
 
 
 def _handle_tree_select(state: AppState, event: events.ValueChangeEventArguments) -> None:
@@ -1174,6 +1204,260 @@ def _build_preview_section(state: AppState) -> None:
         state.markdown_view.style("min-height: 160px;")
 
 
+def _refresh_relationships(state: AppState) -> None:
+    container = state.relationships_container
+    if container is None:
+        return
+    container.clear()
+    
+    block_id = state.selected_block_id
+    if not block_id:
+        with container:
+            ui.label("Select a block to view relationships.").classes("text-sm text-slate-500")
+        return
+
+    try:
+        outgoing = state.store.get_relationships(UUID(block_id), direction="outgoing")
+        incoming = state.store.get_relationships(UUID(block_id), direction="incoming")
+    except Exception as exc:
+        with container:
+            ui.label(f"Error fetching relationships: {exc}").classes("text-sm text-red-500")
+        return
+
+    with container:
+        # Outgoing
+        ui.label("Outgoing Links").classes("text-xs font-bold text-slate-700 mt-2")
+        if not outgoing:
+            ui.label("No outgoing links.").classes("text-xs text-slate-400 italic")
+        else:
+            for rel in outgoing:
+                with ui.row().classes("items-center gap-2 w-full"):
+                    ui.icon("arrow_outward", size="xs").classes("text-slate-400")
+                    ui.label(f"{rel.rel_type} -> {_short_id(rel.target_block_id)}").classes("text-xs flex-1")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda _, r=rel: _delete_relationship(state, r),
+                    ).props("flat dense round size=sm color=grey")
+
+        # Incoming
+        ui.label("Incoming Links").classes("text-xs font-bold text-slate-700 mt-2")
+        if not incoming:
+            ui.label("No incoming links.").classes("text-xs text-slate-400 italic")
+        else:
+            for rel in incoming:
+                with ui.row().classes("items-center gap-2 w-full"):
+                    ui.icon("arrow_downward", size="xs").classes("text-slate-400")
+                    ui.label(f"{rel.rel_type} <- {_short_id(rel.source_block_id)}").classes("text-xs flex-1")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda _, r=rel: _delete_relationship(state, r),
+                    ).props("flat dense round size=sm color=grey")
+
+
+def _add_relationship(state: AppState, target_id: str, rel_type: str, metadata_str: str) -> None:
+    source_id = state.selected_block_id
+    if not source_id:
+        ui.notify("No source block selected.", color="warning")
+        return
+    
+    if not target_id.strip():
+        ui.notify("Target ID required.", color="warning")
+        return
+
+    try:
+        meta = json.loads(metadata_str) if metadata_str.strip() else {}
+    except json.JSONDecodeError:
+        ui.notify("Invalid metadata JSON.", color="negative")
+        return
+
+    # We need workspace_id. Let's get it from the source block.
+    source_block = _resolve_block(state, source_id)
+    if not source_block:
+        ui.notify("Source block not found.", color="negative")
+        return
+    
+    # Check target exists (optional but good UX)
+    # The repository might not enforce it strictly if we don't check, but FK will fail.
+    # Let's just try to create.
+    
+    from block_data_store.models.relationship import Relationship
+    
+    try:
+        rel = Relationship(
+            workspace_id=str(source_block.workspace_id) if source_block.workspace_id else str(UUID(int=0)), # Fallback if none
+            source_block_id=source_id,
+            target_block_id=target_id.strip(),
+            rel_type=rel_type.strip() or "related",
+            metadata=meta
+        )
+        state.store.upsert_relationships([rel])
+        ui.notify("Relationship added.", color="positive")
+        _refresh_relationships(state)
+    except Exception as exc:
+        ui.notify(f"Failed to add link: {exc}", color="negative")
+
+
+def _delete_relationship(state: AppState, rel: Any) -> None:
+    try:
+        state.store.delete_relationships([(UUID(rel.source_block_id), UUID(rel.target_block_id), rel.rel_type)])
+        ui.notify("Relationship deleted.", color="positive")
+        _refresh_relationships(state)
+    except Exception as exc:
+        ui.notify(f"Failed to delete: {exc}", color="negative")
+
+
+def _build_relationships_section(state: AppState) -> None:
+    with ui.expansion("6. Relationships", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
+        ui.markdown(RELATIONSHIPS_TEXT).classes("text-sm text-slate-600 pb-2 w-full")
+        ui.code(RELATIONSHIPS_CODE, language="python").classes(
+            "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
+        )
+
+        state.relationships_container = ui.column().classes("w-full gap-1 mb-4 border border-slate-100 rounded p-2 bg-slate-50")
+        _refresh_relationships(state)
+
+        ui.separator().classes("my-2")
+        ui.label("Add New Link").classes("text-xs font-bold text-slate-700")
+        
+        with ui.grid(columns=2).classes("w-full gap-2"):
+            target_input = ui.input(label="Target Block ID").props("outlined dense").classes("w-full")
+            type_input = ui.input(label="Type", value="related").props("outlined dense").classes("w-full")
+        
+        meta_input = ui.textarea(label="Metadata (JSON)", value="{}").props("outlined dense").classes("w-full")
+        
+        ui.button(
+            "Add Link",
+            on_click=lambda: _add_relationship(state, target_input.value, type_input.value, meta_input.value)
+        ).classes("w-full mt-2")
+
+
+def _refresh_relationships(state: AppState) -> None:
+    container = state.relationships_container
+    if container is None:
+        return
+    container.clear()
+    
+    block_id = state.selected_block_id
+    if not block_id:
+        with container:
+            ui.label("Select a block to view relationships.").classes("text-sm text-slate-500")
+        return
+
+    try:
+        outgoing = state.store.get_relationships(UUID(block_id), direction="outgoing")
+        incoming = state.store.get_relationships(UUID(block_id), direction="incoming")
+    except Exception as exc:
+        with container:
+            ui.label(f"Error fetching relationships: {exc}").classes("text-sm text-red-500")
+        return
+
+    with container:
+        # Outgoing
+        ui.label("Outgoing Links").classes("text-xs font-bold text-slate-700 mt-2")
+        if not outgoing:
+            ui.label("No outgoing links.").classes("text-xs text-slate-400 italic")
+        else:
+            for rel in outgoing:
+                with ui.row().classes("items-center gap-2 w-full"):
+                    ui.icon("arrow_outward", size="xs").classes("text-slate-400")
+                    ui.label(f"{rel.rel_type} -> {_short_id(rel.target_block_id)}").classes("text-xs flex-1")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda _, r=rel: _delete_relationship(state, r),
+                    ).props("flat dense round size=sm color=grey")
+
+        # Incoming
+        ui.label("Incoming Links").classes("text-xs font-bold text-slate-700 mt-2")
+        if not incoming:
+            ui.label("No incoming links.").classes("text-xs text-slate-400 italic")
+        else:
+            for rel in incoming:
+                with ui.row().classes("items-center gap-2 w-full"):
+                    ui.icon("arrow_downward", size="xs").classes("text-slate-400")
+                    ui.label(f"{rel.rel_type} <- {_short_id(rel.source_block_id)}").classes("text-xs flex-1")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda _, r=rel: _delete_relationship(state, r),
+                    ).props("flat dense round size=sm color=grey")
+
+
+def _add_relationship(state: AppState, target_id: str, rel_type: str, metadata_str: str) -> None:
+    source_id = state.selected_block_id
+    if not source_id:
+        ui.notify("No source block selected.", color="warning")
+        return
+    
+    if not target_id.strip():
+        ui.notify("Target ID required.", color="warning")
+        return
+
+    try:
+        meta = json.loads(metadata_str) if metadata_str.strip() else {}
+    except json.JSONDecodeError:
+        ui.notify("Invalid metadata JSON.", color="negative")
+        return
+
+    # We need workspace_id. Let's get it from the source block.
+    source_block = _resolve_block(state, source_id)
+    if not source_block:
+        ui.notify("Source block not found.", color="negative")
+        return
+    
+    # Check target exists (optional but good UX)
+    # The repository might not enforce it strictly if we don't check, but FK will fail.
+    # Let's just try to create.
+    
+    from block_data_store.models.relationship import Relationship
+    
+    try:
+        rel = Relationship(
+            workspace_id=str(source_block.workspace_id) if source_block.workspace_id else str(UUID(int=0)), # Fallback if none
+            source_block_id=source_id,
+            target_block_id=target_id.strip(),
+            rel_type=rel_type.strip() or "related",
+            metadata=meta
+        )
+        state.store.upsert_relationships([rel])
+        ui.notify("Relationship added.", color="positive")
+        _refresh_relationships(state)
+    except Exception as exc:
+        ui.notify(f"Failed to add link: {exc}", color="negative")
+
+
+def _delete_relationship(state: AppState, rel: Any) -> None:
+    try:
+        state.store.delete_relationships([(UUID(rel.source_block_id), UUID(rel.target_block_id), rel.rel_type)])
+        ui.notify("Relationship deleted.", color="positive")
+        _refresh_relationships(state)
+    except Exception as exc:
+        ui.notify(f"Failed to delete: {exc}", color="negative")
+
+
+def _build_relationships_section(state: AppState) -> None:
+    with ui.expansion("6. Relationships", value=False).classes("shadow-sm w-full").props("header-class=font-bold"):
+        ui.markdown(RELATIONSHIPS_TEXT).classes("text-sm text-slate-600 pb-2 w-full")
+        ui.code(RELATIONSHIPS_CODE, language="python").classes(
+            "w-full text-xs bg-slate-100 text-slate-900 border border-slate-200 rounded mb-2"
+        )
+
+        state.relationships_container = ui.column().classes("w-full gap-1 mb-4 border border-slate-100 rounded p-2 bg-slate-50")
+        _refresh_relationships(state)
+
+        ui.separator().classes("my-2")
+        ui.label("Add New Link").classes("text-xs font-bold text-slate-700")
+        
+        with ui.grid(columns=2).classes("w-full gap-2"):
+            target_input = ui.input(label="Target Block ID").props("outlined dense").classes("w-full")
+            type_input = ui.input(label="Type", value="related").props("outlined dense").classes("w-full")
+        
+        meta_input = ui.textarea(label="Metadata (JSON)", value="{}").props("outlined dense").classes("w-full").style("height: 60px;")
+        
+        ui.button(
+            "Add Link",
+            on_click=lambda: _add_relationship(state, target_input.value, type_input.value, meta_input.value)
+        ).classes("w-full mt-2")
+
+
 def _toggle_recursive_preview(state: AppState, include_children: bool) -> None:
     state.render_block_children = include_children
     if state.selected_block_id:
@@ -1206,6 +1490,7 @@ def build_ui(state: AppState) -> None:
                 _build_filters_section(state)
                 _build_inspector_section(state)
                 _build_preview_section(state)
+                _build_relationships_section(state)
 
     _refresh_documents(state)
 
