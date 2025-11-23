@@ -31,15 +31,6 @@ class RelationshipRepository:
         payloads = [self._to_record(rel) for rel in relationships]
 
         with self._session_factory() as session:
-            # We need to ensure workspace_id is set. 
-            # In BlockRepository, it assumes it's in the payload.
-            # Here, if workspace_id is missing in the domain object (it shouldn't be), we might have issues.
-            # But Relationship model has workspace_id.
-            
-            # However, for new relationships, the user might not know the workspace_id if they just link two blocks.
-            # But the Relationship model *requires* workspace_id.
-            # So the caller (DocumentStore) must ensure it's populated.
-            
             from sqlalchemy.dialects.postgresql import insert as pg_insert
             from sqlalchemy.dialects.sqlite import insert as sqlite_insert
             

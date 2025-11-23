@@ -8,10 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Relationship(BaseModel):
-    """Represents a directional relationship between two blocks."""
+    """Represents a directional relationship between two blocks.
+
+    ``workspace_id`` is optional for now to align with block records; callers
+    may supply it when multi-tenant scoping is desired, otherwise it can be
+    left ``None`` and treated as unscoped.
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
-    workspace_id: str
+    workspace_id: str | None = None
     source_block_id: str
     target_block_id: str
     rel_type: str

@@ -71,7 +71,7 @@ class DbRelationship(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     source_block_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("blocks.id", ondelete="CASCADE"), nullable=False
     )
