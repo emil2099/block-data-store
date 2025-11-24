@@ -140,11 +140,104 @@ class DocumentStore:
             expected_old_parent_version=resolved_old_parent_version,
         )
 
-    def save_blocks(self, blocks: Sequence[Block]) -> None:
-        """Persist a collection of blocks (documents or fragments)."""
+    def upsert_blocks(
+        self,
+        blocks: Sequence[Block],
+        *,
+        parent_id: UUID | None = None,
+        insert_after: UUID | None = None,
+        top_level_only: bool = True,
+    ) -> None:
+        """Persist blocks with optional atomic parent-child update.
+        
+        Args:
+            blocks: Blocks to save
+            parent_id: If provided, atomically append to this parent's children
+            insert_after: Insert after this child (None = append to end)
+            top_level_only: Only append root blocks of the tree to parent
+            
+        Examples:
+            # Simple upsert (backward compatible)
+            store.upsert_blocks([block1, block2])
+            
+            # Add document to workspace (top-level only)
+            blocks = load_markdown_path("doc.md")
+            store.upsert_blocks(blocks, parent_id=workspace_id)
+            
+            # Insert paragraph after specific block
+            store.upsert_blocks(
+                [new_para],
+                parent_id=document_id,
+                insert_after=paragraph_3_id
+            )
+        """
         if not blocks:
             return
-        self._repository.upsert_blocks(blocks)
+
+        # Simple case: no parent update (backward compatible)
+        if parent_id is None:
+            self._repository.upsert_blocks(blocks)
+            return
+
+        # Parent update case: prepare parameters
+        parent = self._require_block(parent_id)
+
+        # Identify which blocks to add as children (top-level detection)
+        if top_level_only:
+            block_ids_set = {b.id for b in blocks}
+            blocks_to_append = [
+                b for b in blocks
+                if b.parent_id is None or b.parent_id not in block_ids_set
+            ]
+        else:
+            blocks_to_append = list(blocks)
+
+        # Update parent references for appended blocks only
+        updated_blocks = []
+        append_ids = {b.id for b in blocks_to_append}
+
+        for block in blocks:
+            if block.id in append_ids:
+                # Top-level blocks: override parent_id and root_id
+                updated_blocks.append(
+                    block.model_copy(update={
+                        "parent_id": parent_id,
+                        "root_id": parent.root_id or parent_id,
+                    })
+                )
+            else:
+                # Non-top-level blocks: keep their existing hierarchy
+                updated_blocks.append(block)
+
+        # Calculate new children_ids with insertion logic
+        current_children = list(parent.children_ids)
+        new_child_ids = [b.id for b in blocks_to_append]
+
+        if insert_after is None:
+            # Append to end
+            updated_children = current_children + new_child_ids
+        else:
+            # Insert after specified block
+            try:
+                insert_index = current_children.index(insert_after) + 1
+            except ValueError:
+                raise DocumentStoreError(
+                    f"insert_after block {insert_after} not found in parent {parent_id}'s children"
+                )
+            updated_children = (
+                current_children[:insert_index]
+                + new_child_ids
+                + current_children[insert_index:]
+            )
+
+        # Single atomic transaction via unified repository method
+        self._repository.upsert_blocks(
+            blocks=updated_blocks,
+            parent_id=parent_id,
+            new_children_ids=updated_children,
+        )
+
+
 
     def set_in_trash(self, block_ids: Sequence[UUID], *, in_trash: bool) -> None:
         """Toggle the trash flag for supplied blocks and their descendants."""

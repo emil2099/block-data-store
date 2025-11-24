@@ -17,7 +17,7 @@ def test_create_relationship(document_store: DocumentStore, block_factory):
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel = Relationship(
         workspace_id=str(workspace_id),
@@ -40,7 +40,7 @@ def test_relationship_directionality(document_store: DocumentStore, block_factor
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel = Relationship(
         workspace_id=str(workspace_id),
@@ -71,7 +71,7 @@ def test_relationship_uniqueness(document_store: DocumentStore, block_factory):
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel1 = Relationship(
         workspace_id=str(workspace_id),
@@ -93,7 +93,7 @@ def test_delete_relationship(document_store: DocumentStore, block_factory):
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel = Relationship(
         workspace_id=str(workspace_id),
@@ -116,7 +116,7 @@ def test_soft_delete_visibility(document_store: DocumentStore, block_factory):
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel = Relationship(
         workspace_id=str(workspace_id),
@@ -144,7 +144,7 @@ def test_hard_delete_cascade(document_store: DocumentStore, block_factory, engin
     workspace_id = uuid4()
     block_a = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
     block_b = block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
-    document_store.save_blocks([block_a, block_b])
+    document_store.upsert_blocks([block_a, block_b])
 
     rel = Relationship(
         workspace_id=str(workspace_id),
@@ -171,7 +171,7 @@ def test_batch_create_relationships(document_store: DocumentStore, block_factory
         block_factory(block_type=BlockType.PARAGRAPH, parent_id=None, root_id=root_id, workspace_id=workspace_id)
         for _ in range(5)
     ]
-    document_store.save_blocks(blocks)
+    document_store.upsert_blocks(blocks)
 
     # Create chain: 0->1, 1->2, 2->3, 3->4
     rels = [

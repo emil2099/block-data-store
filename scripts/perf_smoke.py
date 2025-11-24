@@ -198,7 +198,7 @@ def main() -> None:
         parse_ms = (time.perf_counter() - parse_start) * 1000
 
         ingest_start = time.perf_counter()
-        store.save_blocks(blocks)
+        store.upsert_blocks(blocks)
         ingest_ms = (time.perf_counter() - ingest_start) * 1000
 
         document_block = next((b for b in blocks if b.type is BlockType.DOCUMENT), None)

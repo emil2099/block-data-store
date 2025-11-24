@@ -66,7 +66,7 @@ def test_markdown_round_trip_document(
     document_store: DocumentStore,
 ) -> None:
     blocks = markdown_to_blocks(source)
-    document_store.save_blocks(blocks)
+    document_store.upsert_blocks(blocks)
     document = document_store.get_root_tree(blocks[0].id, depth=None)
 
     renderer = MarkdownRenderer()

@@ -108,7 +108,7 @@ create_all(engine)
 store = create_document_store(create_session_factory(engine))
 
 blocks = load_markdown_path("data/sample.md")
-store.save_blocks(blocks)
+store.upsert_blocks(blocks)
 """
 
 FILTERS_TEXT = """
@@ -143,13 +143,13 @@ INSPECTOR_TEXT = """
 
 - Block metadata is shown as Markdown for quick scanning.
 - Editable JSON panes let you tweak `properties`, `metadata`, and `content`.
-- Saving issues an upsert through `DocumentStore.save_blocks`, bumping the
+- Saving issues an upsert through `DocumentStore.upsert_blocks`, bumping the
   version and timestamps.
 """
 
 INSPECTOR_CODE = """
 updated_block = block.model_copy(update={"properties": new_props})
-store.save_blocks([updated_block])
+store.upsert_blocks([updated_block])
 """
 
 PREVIEW_TEXT = """
@@ -376,7 +376,7 @@ def _seed_documents(state: AppState) -> None:
                 with log_duration(f"seed.markdown::{path.name}"):
                     blocks = load_markdown_path(path)
                     blocks = _attach_source_metadata(blocks, path.name)
-                    state.store.save_blocks(blocks)
+                    state.store.upsert_blocks(blocks)
         _seed_sample_pdfs(state)
         _seed_sample_dataset(state)
 
@@ -409,7 +409,7 @@ def _seed_sample_pdfs(state: AppState) -> None:
             metadata = dict(root.metadata)
             metadata["demo_seed"] = marker
             blocks[0] = root.model_copy(update={"metadata": metadata})
-            state.store.save_blocks(blocks)
+            state.store.upsert_blocks(blocks)
             LOGGER.info("Seeded PDF document: %s", path.name)
 
 
@@ -440,7 +440,7 @@ def _seed_sample_dataset(state: AppState) -> None:
         metadata = dict(root.metadata)
         metadata["demo_seed"] = "seed::dataset"
         blocks[0] = root.model_copy(update={"metadata": metadata})
-        state.store.save_blocks(blocks)
+        state.store.upsert_blocks(blocks)
         LOGGER.info("Seeded dataset document from %s", target.name)
 
 
@@ -896,7 +896,7 @@ def _save_block_changes(state: AppState) -> None:
         }
     )
 
-    state.store.save_blocks([updated_block])
+    state.store.upsert_blocks([updated_block])
 
     block_id_str = str(updated_block.id)
     root_id_str = str(updated_block.root_id)
@@ -990,7 +990,7 @@ def _build_upload_section(state: AppState) -> None:
                 return
             blocks = markdown_to_blocks(content)
             blocks = _attach_source_metadata(blocks, event.file.name)
-            state.store.save_blocks(blocks)
+            state.store.upsert_blocks(blocks)
             ui.notify("Stored Markdown document", color="positive")
             _refresh_documents(state, selected=str(blocks[0].id))
 
@@ -1002,7 +1002,7 @@ def _build_upload_section(state: AppState) -> None:
                 ui.notify(f"Azure DI parse failed: {exc}", color="negative")
                 return
             blocks = _attach_source_metadata(blocks, event.file.name)
-            state.store.save_blocks(blocks)
+            state.store.upsert_blocks(blocks)
             ui.notify("Stored Azure DI document", color="positive")
             _refresh_documents(state, selected=str(blocks[0].id))
 
@@ -1014,7 +1014,7 @@ def _build_upload_section(state: AppState) -> None:
                 ui.notify(f"Dataset parse failed: {exc}", color="negative")
                 return
             blocks = _attach_source_metadata(blocks, event.file.name)
-            state.store.save_blocks(blocks)
+            state.store.upsert_blocks(blocks)
             ui.notify("Stored dataset", color="positive")
             _refresh_documents(state, selected=str(blocks[0].id))
 

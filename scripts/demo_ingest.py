@@ -22,7 +22,7 @@ def main() -> None:
     create_all(engine)
     session_factory = create_session_factory(engine)
     store = create_document_store(session_factory)
-    store.save_blocks(blocks)
+    store.upsert_blocks(blocks)
 
     document = store.get_root_tree(blocks[0].id)
     if document is None:

@@ -110,21 +110,75 @@ class BlockRepository:
 
         return [self._with_resolvers(self._to_model(row)) for row in rows]
 
-    def upsert_blocks(self, blocks: Sequence[Block]) -> None:
-        """Insert or update blocks in bulk."""
+    def upsert_blocks(
+        self,
+        blocks: Sequence[Block],
+        *,
+        parent_id: UUID | None = None,
+        new_children_ids: Sequence[UUID] | None = None,
+    ) -> None:
+        """Insert or update blocks with optional atomic parent update.
+        
+        This unified method handles both simple upserts and parent-child updates
+        in a single transaction.
+        
+        Args:
+            blocks: Blocks to save
+            parent_id: Optional parent to update
+            new_children_ids: New children list for parent (required if parent_id set)
+            
+        Raises:
+            BlockNotFoundError: If parent doesn't exist
+        """
         if not blocks:
             return
 
-        payloads = [self._to_record(block) for block in blocks]
-
         with self._session_factory() as session:
+            # Validate parent update parameters
+            if parent_id is not None:
+                if new_children_ids is None:
+                    raise ValueError(
+                        "new_children_ids required when parent_id is set"
+                    )
+                
+                # Verify parent exists
+                parent_row = session.get(DbBlock, str(parent_id))
+                if parent_row is None:
+                    raise BlockNotFoundError(f"Parent {parent_id} does not exist")
+
+            # Upsert all blocks
+            payloads = [self._to_record(block) for block in blocks]
             bind = session.get_bind()
+
             if bind is not None and bind.dialect.name == "postgresql":
-                self._bulk_upsert_postgres(session, payloads)
+                # Use PostgreSQL's efficient ON CONFLICT DO UPDATE
+                if payloads:
+                    stmt = pg_insert(DbBlock).values(payloads)
+                    update_cols = {
+                        col.name: getattr(stmt.excluded, col.name)
+                        for col in DbBlock.__table__.columns
+                        if col.name != "id"
+                    }
+                    session.execute(
+                        stmt.on_conflict_do_update(
+                            index_elements=[DbBlock.id],
+                            set_=update_cols
+                        )
+                    )
             else:
+                # SQLite fallback
                 for payload in payloads:
                     session.merge(DbBlock(**payload))
-                session.commit()
+
+            # Update parent if specified
+            if parent_id is not None:
+                parent_row.children_ids = [str(cid) for cid in new_children_ids]
+                parent_row.version += 1
+                from datetime import datetime, timezone
+                parent_row.last_edited_time = datetime.now(timezone.utc)
+
+            # Single commit for everything
+            session.commit()
 
     def set_in_trash(
         self,

@@ -234,7 +234,7 @@ def main() -> None:
                 blocks_per_document = len(blocks)
 
         ingest_start = time.perf_counter()
-        store.save_blocks(batch_blocks)
+        store.upsert_blocks(batch_blocks)
         ingest_ms = (time.perf_counter() - ingest_start) * 1000
 
         document_ids.extend(batch_doc_ids)
