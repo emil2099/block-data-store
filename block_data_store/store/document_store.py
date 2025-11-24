@@ -148,41 +148,17 @@ class DocumentStore:
         insert_after: UUID | None = None,
         top_level_only: bool = True,
     ) -> None:
-        """Persist blocks with optional atomic parent-child update.
-        
-        Args:
-            blocks: Blocks to save
-            parent_id: If provided, atomically append to this parent's children
-            insert_after: Insert after this child (None = append to end)
-            top_level_only: Only append root blocks of the tree to parent
-            
-        Examples:
-            # Simple upsert (backward compatible)
-            store.upsert_blocks([block1, block2])
-            
-            # Add document to workspace (top-level only)
-            blocks = load_markdown_path("doc.md")
-            store.upsert_blocks(blocks, parent_id=workspace_id)
-            
-            # Insert paragraph after specific block
-            store.upsert_blocks(
-                [new_para],
-                parent_id=document_id,
-                insert_after=paragraph_3_id
-            )
-        """
+        """Persist blocks and, optionally, attach top-level ones to a parent."""
         if not blocks:
             return
 
-        # Simple case: no parent update (backward compatible)
         if parent_id is None:
             self._repository.upsert_blocks(blocks)
-            return
+            return  # pure upsert
 
-        # Parent update case: prepare parameters
         parent = self._require_block(parent_id)
 
-        # Identify which blocks to add as children (top-level detection)
+        # Identify which blocks become direct children
         if top_level_only:
             block_ids_set = {b.id for b in blocks}
             blocks_to_append = [
@@ -192,25 +168,29 @@ class DocumentStore:
         else:
             blocks_to_append = list(blocks)
 
-        # Update parent references for appended blocks only
-        updated_blocks = []
         append_ids = {b.id for b in blocks_to_append}
+        updated_blocks = []
 
         for block in blocks:
             if block.id in append_ids:
-                # Top-level blocks: override parent_id and root_id
+                # Attach to parent; preserve existing root_id if present
+                new_root = block.root_id or parent.root_id
                 updated_blocks.append(
                     block.model_copy(update={
                         "parent_id": parent_id,
-                        "root_id": parent.root_id or parent_id,
+                        "root_id": new_root,
                     })
                 )
             else:
-                # Non-top-level blocks: keep their existing hierarchy
+                # Keep existing hierarchy for nested blocks
                 updated_blocks.append(block)
 
-        # Calculate new children_ids with insertion logic
-        current_children = list(parent.children_ids)
+        # Persist all blocks first
+        self._repository.upsert_blocks(updated_blocks)
+
+        # Refresh parent to get latest version/children
+        parent_fresh = self._require_block(parent_id)
+        current_children = list(parent_fresh.children_ids)
         new_child_ids = [b.id for b in blocks_to_append]
 
         if insert_after is None:
@@ -230,11 +210,11 @@ class DocumentStore:
                 + current_children[insert_index:]
             )
 
-        # Single atomic transaction via unified repository method
-        self._repository.upsert_blocks(
-            blocks=updated_blocks,
-            parent_id=parent_id,
-            new_children_ids=updated_children,
+        # Structural update with optimistic concurrency and validation
+        self._repository.set_children(
+            parent_id,
+            updated_children,
+            expected_version=parent_fresh.version,
         )
 
 
