@@ -65,6 +65,7 @@ from block_data_store.repositories.filters import (
     RootFilter,
     WhereClause,
 )
+from block_data_store.startup import ensure_workspace
 from block_data_store.store import DocumentStore, create_document_store
 
 DB_PATH = Path(__file__).resolve().parent / "nicegui_demo.db"
@@ -224,6 +225,7 @@ incoming = store.get_relationships(target_id, direction="incoming")
 class AppState:
     store: DocumentStore
     renderer: MarkdownRenderer
+    workspace_id: UUID | None = None
     show_trashed: bool = False
     documents: list[Block] = field(default_factory=list)
     documents_by_id: dict[str, Block] = field(default_factory=dict)
@@ -359,7 +361,8 @@ def _bootstrap_state(engine) -> AppState:
         session_factory = create_session_factory(engine)
         store = create_document_store(session_factory)
         renderer = MarkdownRenderer()
-        state = AppState(store=store, renderer=renderer)
+        workspace = ensure_workspace(store, title="Demo Workspace")
+        state = AppState(store=store, renderer=renderer, workspace_id=workspace.id)
         _seed_documents(state)
         return state
 
@@ -376,7 +379,11 @@ def _seed_documents(state: AppState) -> None:
                 with log_duration(f"seed.markdown::{path.name}"):
                     blocks = load_markdown_path(path)
                     blocks = _attach_source_metadata(blocks, path.name)
-                    state.store.upsert_blocks(blocks)
+                    state.store.upsert_blocks(
+                        blocks,
+                        parent_id=state.workspace_id,
+                        top_level_only=True,
+                    )
         _seed_sample_pdfs(state)
         _seed_sample_dataset(state)
 
@@ -409,7 +416,11 @@ def _seed_sample_pdfs(state: AppState) -> None:
             metadata = dict(root.metadata)
             metadata["demo_seed"] = marker
             blocks[0] = root.model_copy(update={"metadata": metadata})
-            state.store.upsert_blocks(blocks)
+            state.store.upsert_blocks(
+                blocks,
+                parent_id=state.workspace_id,
+                top_level_only=True,
+            )
             LOGGER.info("Seeded PDF document: %s", path.name)
 
 
@@ -440,7 +451,11 @@ def _seed_sample_dataset(state: AppState) -> None:
         metadata = dict(root.metadata)
         metadata["demo_seed"] = "seed::dataset"
         blocks[0] = root.model_copy(update={"metadata": metadata})
-        state.store.upsert_blocks(blocks)
+        state.store.upsert_blocks(
+            blocks,
+            parent_id=state.workspace_id,
+            top_level_only=True,
+        )
         LOGGER.info("Seeded dataset document from %s", target.name)
 
 
