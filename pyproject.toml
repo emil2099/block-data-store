@@ -25,8 +25,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/emil2099/block_data_store"
-Source = "https://github.com/emil2099/block_data_store"
+Homepage = "https://github.com/emil2099/block-data-store"
+Source = "https://github.com/emil2099/block-data-store"
 
 [tool.setuptools.packages.find]
 include = ["block_data_store", "block_data_store.*"]
