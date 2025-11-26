@@ -5,13 +5,13 @@ Unified block-based content model with persistence, parsing, and rendering layer
 ## Install (from GitHub)
 
 ```bash
-pip install git+https://github.com/emil2099/block_data_store.git
+pip install git+https://github.com/emil2099/block-data-store.git
 ```
 
 Pin a tag or commit for reproducible installs, e.g.:
 
 ```bash
-pip install "git+https://github.com/emil2099/block_data_store.git@v0.1.0"
+pip install "git+https://github.com/emil2099/block-data-store.git@v0.1.0"
 ```
 
 ## Quickstart
