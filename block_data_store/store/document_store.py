@@ -47,11 +47,6 @@ class DocumentStore:
             raise DocumentStoreError(f"Block {root_block_id} is not a supported root type.")
         return root_block
 
-    def list_documents(self, *, limit: int | None = None) -> list[Block]:
-        """Return canonical documents ordered by repository defaults."""
-        where = WhereClause(type=BlockType.DOCUMENT)
-        return self._repository.query_blocks(where=where, limit=limit)
-
     def query_blocks(
         self,
         *,

@@ -793,3 +793,247 @@ def test_query_blocks_supports_nested_json_paths_and_operators(repository, block
         property_filter=not_filter,
     )
     assert {block.id for block in not_match} == {record_active_id}
+
+
+def test_query_with_multiple_types_filter(repository, block_factory):
+    """Test filtering by multiple block types in a single query."""
+    document_id = uuid4()
+    dataset_id = uuid4()
+    record_id = uuid4()
+    paragraph_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+                children_ids=(dataset_id, paragraph_id),
+            ),
+            block_factory(
+                block_id=dataset_id,
+                block_type=BlockType.DATASET,
+                parent_id=document_id,
+                root_id=document_id,
+                children_ids=(record_id,),
+            ),
+            block_factory(
+                block_id=record_id,
+                block_type=BlockType.RECORD,
+                parent_id=dataset_id,
+                root_id=document_id,
+            ),
+            block_factory(
+                block_id=paragraph_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=document_id,
+                root_id=document_id,
+            ),
+        ]
+    )
+
+    # Query for documents and datasets together
+    content_containers = repository.query_blocks(
+        where=WhereClause(type=[BlockType.DOCUMENT, BlockType.DATASET])
+    )
+    container_ids = {block.id for block in content_containers}
+    assert container_ids == {document_id, dataset_id}
+
+    # Single type should still work
+    documents_only = repository.query_blocks(
+        where=WhereClause(type=BlockType.DOCUMENT)
+    )
+    assert [block.id for block in documents_only] == [document_id]
+
+
+def test_query_with_multiple_parents_filter(repository, block_factory):
+    """Test filtering by multiple parent IDs in a single query."""
+    document_id = uuid4()
+    heading_a_id = uuid4()
+    heading_b_id = uuid4()
+    para_a1_id = uuid4()
+    para_a2_id = uuid4()
+    para_b1_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=document_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=document_id,
+                children_ids=(heading_a_id, heading_b_id),
+            ),
+            block_factory(
+                block_id=heading_a_id,
+                block_type=BlockType.HEADING,
+                parent_id=document_id,
+                root_id=document_id,
+                children_ids=(para_a1_id, para_a2_id),
+            ),
+            block_factory(
+                block_id=heading_b_id,
+                block_type=BlockType.HEADING,
+                parent_id=document_id,
+                root_id=document_id,
+                children_ids=(para_b1_id,),
+            ),
+            block_factory(
+                block_id=para_a1_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_a_id,
+                root_id=document_id,
+            ),
+            block_factory(
+                block_id=para_a2_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_a_id,
+                root_id=document_id,
+            ),
+            block_factory(
+                block_id=para_b1_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=heading_b_id,
+                root_id=document_id,
+            ),
+        ]
+    )
+
+    # Query for paragraphs under both headings
+    combined_paragraphs = repository.query_blocks(
+        where=WhereClause(
+            type=BlockType.PARAGRAPH,
+            parent_id=[heading_a_id, heading_b_id]
+        )
+    )
+    para_ids = {block.id for block in combined_paragraphs}
+    assert para_ids == {para_a1_id, para_a2_id, para_b1_id}
+
+
+def test_query_with_multiple_roots_filter(repository, block_factory):
+    """Test filtering by multiple root IDs in a single query."""
+    doc_a_id = uuid4()
+    doc_b_id = uuid4()
+    doc_c_id = uuid4()
+    para_a_id = uuid4()
+    para_b_id = uuid4()
+    para_c_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=doc_a_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_a_id,
+                children_ids=(para_a_id,),
+            ),
+            block_factory(
+                block_id=doc_b_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_b_id,
+                children_ids=(para_b_id,),
+            ),
+            block_factory(
+                block_id=doc_c_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_c_id,
+                children_ids=(para_c_id,),
+            ),
+            block_factory(
+                block_id=para_a_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=doc_a_id,
+                root_id=doc_a_id,
+            ),
+            block_factory(
+                block_id=para_b_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=doc_b_id,
+                root_id=doc_b_id,
+            ),
+            block_factory(
+                block_id=para_c_id,
+                block_type=BlockType.PARAGRAPH,
+                parent_id=doc_c_id,
+                root_id=doc_c_id,
+            ),
+        ]
+    )
+
+    # Query paragraphs from doc_a and doc_b only
+    selected_paragraphs = repository.query_blocks(
+        where=WhereClause(
+            type=BlockType.PARAGRAPH,
+            root_id=[doc_a_id, doc_b_id]
+        )
+    )
+    para_ids = {block.id for block in selected_paragraphs}
+    assert para_ids == {para_a_id, para_b_id}
+
+
+def test_query_with_workspace_id_filter(repository, block_factory):
+    """Test filtering by single and multiple workspace IDs."""
+    workspace_a = uuid4()
+    workspace_b = uuid4()
+    doc_a1_id = uuid4()
+    doc_a2_id = uuid4()
+    doc_b1_id = uuid4()
+    doc_none_id = uuid4()
+
+    repository.upsert_blocks(
+        [
+            block_factory(
+                block_id=doc_a1_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_a1_id,
+                workspace_id=workspace_a,
+            ),
+            block_factory(
+                block_id=doc_a2_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_a2_id,
+                workspace_id=workspace_a,
+            ),
+            block_factory(
+                block_id=doc_b1_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_b1_id,
+                workspace_id=workspace_b,
+            ),
+            block_factory(
+                block_id=doc_none_id,
+                block_type=BlockType.DOCUMENT,
+                parent_id=None,
+                root_id=doc_none_id,
+                workspace_id=None,
+            ),
+        ]
+    )
+
+    # Query for single workspace
+    workspace_a_docs = repository.query_blocks(
+        where=WhereClause(workspace_id=workspace_a)
+    )
+    workspace_a_ids = {block.id for block in workspace_a_docs}
+    assert workspace_a_ids == {doc_a1_id, doc_a2_id}
+
+    # Query for multiple workspaces
+    multi_workspace_docs = repository.query_blocks(
+        where=WhereClause(workspace_id=[workspace_a, workspace_b])
+    )
+    multi_workspace_ids = {block.id for block in multi_workspace_docs}
+    assert multi_workspace_ids == {doc_a1_id, doc_a2_id, doc_b1_id}
+
+    # Query without workspace filter should return all
+    all_docs = repository.query_blocks(
+        where=WhereClause(type=BlockType.DOCUMENT)
+    )
+    assert len(all_docs) == 4
+

@@ -15,11 +15,12 @@ from block_data_store.models.block import BlockType
 
 @dataclass(frozen=True, slots=True)
 class WhereClause:
-    """Structural filters applied to blocks (type, parent, root)."""
+    """Structural filters applied to blocks (type, parent, root, workspace)."""
 
-    type: BlockType | str | None = None
-    parent_id: UUID | str | None = None
-    root_id: UUID | str | None = None
+    type: BlockType | str | Sequence[BlockType | str] | None = None
+    parent_id: UUID | str | Sequence[UUID | str] | None = None
+    root_id: UUID | str | Sequence[UUID | str] | None = None
+    workspace_id: UUID | str | Sequence[UUID | str] | None = None
 
 
 class FilterOperator(str, Enum):
@@ -97,14 +98,38 @@ class RootFilter:
 
 
 def apply_structural_filters(query, model, where: WhereClause):
-    """Apply structural filters (type/parent/root) to a SQLAlchemy query."""
+    """Apply structural filters (type/parent/root/workspace) to a SQLAlchemy query."""
     if where.type is not None:
-        type_value = where.type.value if isinstance(where.type, BlockType) else str(where.type)
-        query = query.filter(model.type == type_value)
+        if isinstance(where.type, (list, tuple)):
+            type_values = [
+                t.value if isinstance(t, BlockType) else str(t) for t in where.type
+            ]
+            query = query.filter(model.type.in_(type_values))
+        else:
+            type_value = where.type.value if isinstance(where.type, BlockType) else str(where.type)
+            query = query.filter(model.type == type_value)
+    
     if where.parent_id is not None:
-        query = query.filter(model.parent_id == str(where.parent_id))
+        if isinstance(where.parent_id, (list, tuple)):
+            parent_id_values = [str(pid) for pid in where.parent_id]
+            query = query.filter(model.parent_id.in_(parent_id_values))
+        else:
+            query = query.filter(model.parent_id == str(where.parent_id))
+    
     if where.root_id is not None:
-        query = query.filter(model.root_id == str(where.root_id))
+        if isinstance(where.root_id, (list, tuple)):
+            root_id_values = [str(rid) for rid in where.root_id]
+            query = query.filter(model.root_id.in_(root_id_values))
+        else:
+            query = query.filter(model.root_id == str(where.root_id))
+    
+    if where.workspace_id is not None:
+        if isinstance(where.workspace_id, (list, tuple)):
+            workspace_id_values = [str(wid) for wid in where.workspace_id]
+            query = query.filter(model.workspace_id.in_(workspace_id_values))
+        else:
+            query = query.filter(model.workspace_id == str(where.workspace_id))
+    
     return query
 
 

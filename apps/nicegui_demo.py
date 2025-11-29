@@ -369,7 +369,7 @@ def _bootstrap_state(engine) -> AppState:
 
 def _seed_documents(state: AppState) -> None:
     with log_duration("seed.documents"):
-        documents = state.store.list_documents()
+        documents = state.store.query_blocks(where=WhereClause(type=BlockType.DOCUMENT))
         if documents:
             LOGGER.info("Seed skipped: %d documents already present", len(documents))
         else:
@@ -401,7 +401,7 @@ def _seed_sample_pdfs(state: AppState) -> None:
                 LOGGER.info("PDF seed skipped; file missing: %s", path.name)
                 continue
             marker = f"seed::pdf::{path.name}"
-            existing = state.store.list_documents()
+            existing = state.store.query_blocks(where=WhereClause(type=BlockType.DOCUMENT))
             if any((doc.metadata or {}).get("demo_seed") == marker for doc in existing):
                 LOGGER.info("PDF %s already seeded", path.name)
                 continue
@@ -677,7 +677,7 @@ def _load_document(state: AppState, document_id: str | None) -> None:
 
 def _refresh_documents(state: AppState, selected: str | None = None) -> None:
     with log_duration("ui.refresh_documents"):
-        documents = state.store.list_documents()
+        documents = state.store.query_blocks(where=WhereClause(type=BlockType.DOCUMENT))
         dataset_roots = [
             block
             for block in state.store.query_blocks(where=WhereClause(type=BlockType.DATASET))

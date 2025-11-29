@@ -189,6 +189,15 @@ blocks = store.query_blocks(
         property_filter=PropertyFilter(path="content.plain_text", value="important", operator="contains")
     )
 )
+
+# Filter by multiple types (OR logic) and workspace
+# This returns all blocks that are either Documents OR Datasets within the specified workspace
+mixed_blocks = store.query_blocks(
+    where=WhereClause(
+        type=[BlockType.DOCUMENT, BlockType.DATASET],
+        workspace_id=workspace.id
+    )
+)
 ```
 
 ### Retrieving Trees
