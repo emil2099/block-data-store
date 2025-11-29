@@ -27,6 +27,7 @@ from .quote import QuoteBlock, QuoteProps
 from .record import RecordBlock, RecordProps
 from .table import TableBlock, TableProps
 from .unsupported import UnsupportedBlock, UnsupportedProps
+from .system_container import SystemContainerBlock, SystemContainerProps
 from .workspace import WorkspaceBlock, WorkspaceProps
 
 AnyBlock = Annotated[
@@ -49,6 +50,7 @@ AnyBlock = Annotated[
         GroupIndexBlock,
         PageGroupBlock,
         ChunkGroupBlock,
+        SystemContainerBlock,
         UnsupportedBlock,
     ],
     Field(discriminator="type"),
@@ -73,6 +75,7 @@ BLOCK_CLASS_MAP = {
     BlockType.GROUP_INDEX: GroupIndexBlock,
     BlockType.PAGE_GROUP: PageGroupBlock,
     BlockType.CHUNK_GROUP: ChunkGroupBlock,
+    BlockType.SYSTEM_CONTAINER: SystemContainerBlock,
     BlockType.UNSUPPORTED: UnsupportedBlock,
 }
 
@@ -95,6 +98,7 @@ PROPERTIES_CLASS_MAP = {
     BlockType.GROUP_INDEX: GroupIndexProps,
     BlockType.PAGE_GROUP: PageGroupProps,
     BlockType.CHUNK_GROUP: ChunkGroupProps,
+    BlockType.SYSTEM_CONTAINER: SystemContainerProps,
     BlockType.UNSUPPORTED: UnsupportedProps,
 }
 
@@ -150,6 +154,8 @@ __all__ = [
     "PageGroupProps",
     "ChunkGroupBlock",
     "ChunkGroupProps",
+    "SystemContainerBlock",
+    "SystemContainerProps",
     "UnsupportedBlock",
     "UnsupportedProps",
     "block_class_for",

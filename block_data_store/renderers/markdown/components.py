@@ -542,6 +542,7 @@ DEFAULT_COMPONENTS: dict[BlockType, RendererComponent] = {
     BlockType.GROUP_INDEX: GroupIndexComponent(),
     BlockType.PAGE_GROUP: PageGroupComponent(),
     BlockType.CHUNK_GROUP: StructuralComponent(),
+    BlockType.SYSTEM_CONTAINER: StructuralComponent(),
     BlockType.UNSUPPORTED: UnsupportedComponent(),
 }
 

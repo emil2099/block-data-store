@@ -380,6 +380,7 @@ def test_object_renderer_renders_summary_and_json(block_factory):
         (BlockType.GROUP_INDEX, {"group_index_type": "page"}),
         (BlockType.PAGE_GROUP, {"page_number": 1}),
         (BlockType.CHUNK_GROUP, {}),
+        (BlockType.SYSTEM_CONTAINER, {"category": "feature_flags"}),
     ],
 )
 def test_structural_blocks_render_empty_output(block_factory, block_type, properties):

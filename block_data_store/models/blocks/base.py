@@ -30,6 +30,7 @@ class BlockType(str, Enum):
     GROUP_INDEX = "group_index"
     PAGE_GROUP = "page_group"
     CHUNK_GROUP = "chunk_group"
+    SYSTEM_CONTAINER = "system_container"
     UNSUPPORTED = "unsupported"
 
 

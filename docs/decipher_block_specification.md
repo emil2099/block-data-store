@@ -6,6 +6,13 @@ The purpose of this document is to define the minimal and definitive set of Bloc
 
 This specification serves as the canonical source of truth for the block data model. It builds upon the foundational concepts in the "Core Data Model and Architecture Specification" and provides the concrete details needed for implementation. As our thinking evolves, this document will be updated to reflect the most current design decisions.
 
+### Change Log
+
+| **Version** | **Date** | **Author** | **Change** |
+| --- | --- | --- | --- |
+| v0.1.1 | 29 November 2025 | @Emil Kalimullin | - Added SystemContainerBlock to System Blocks |
+| v0.1.0 | 5 November 2025 | @Emil Kalimullin | - Initial version of the Decipher Block Specification |
+
 ## 2. Core Principles
 
 The design of our block model is guided by a few core principles that ensure flexibility, scalability, and clarity.
@@ -57,7 +64,7 @@ All keys within the content object are **optional**. A block may contain one 
 | object | JSON object | A structured object for complex, nested data. Can be used to represent richly formatted text, custom components, or other non-tabular structured data. |
 | data | JSON object | A structured object specifically representing a data record, such as a row from a table or dataset. Typically a flat key-value map where keys are column names. |
 
-## 4. Open Questions - Update these during document production
+## 4. Open Questions
 
 This section serves as a living list of architectural questions and trade-offs that need to be explicitly addressed and decided upon as this specification evolves.
 
@@ -100,6 +107,7 @@ This section provides a high-level overview of every block type defined in this 
 | **group_index** | Grouping | group_index_type | Yes (only group types) | Structural |
 | **page_group** | Grouping | page_number | No | Structural |
 | **chunk_group** | Grouping | (none) | No | Structural |
+| **system_container** | System Settings | category | Yes | object |
 
 ## 6. Container Blocks
 
@@ -572,6 +580,25 @@ This block has no specific typed properties. It simply inherits from Base Block.
 
 - A renderer should display a simple, non-intrusive placeholder (e.g., [unsupported content]) or render nothing. This ensures the block is noted without breaking the flow of the document.
 
+### SystemContainerBlock
+
+- **Type:** system_container
+- **Purpose:** A root-level container for structural configuration, templates, and administrative definitions. It is the canonical parent for ObjectBlocks that define system behaviour, such as dropdown options, schema templates, and feature flags. This keeps configuration separate from user-facing narrative and analytics content, and out of general search and analytics queries.
+
+**Typed Properties (properties)**
+
+| **Property** | **Data Type** | **Required** | **Description** |
+| --- | --- | --- | --- |
+| category | string | Yes | Defines the specific system role for this container (for example, 'template_registry', 'category_definitions', or 'feature_flags'). Enables programmatic queries for a given configuration set. |
+
+**Content Usage**
+
+This is a structural block and does not contain content.
+
+**Renderer Behavior**
+
+- Not rendered in standard document or dataset views. Administrative interfaces may read and render the contents as needed.
+
 ## 11. Future Considerations: Deferred Block Types
 
 To maintain a lean and focused initial implementation, a number of block types have been explicitly deferred. The core architecture is designed to be extensible, and the following blocks represent logical next steps that can be added in the future without requiring fundamental changes to the base model.
@@ -589,31 +616,41 @@ To maintain a lean and focused initial implementation, a number of block types h
 
 ### 12.1. Handling Deletion
 
-The system now uses a **cascading soft-delete model**. This aligns the data platform with its read-heavy usage profile by paying the complexity cost once, at the time of deletion or restoration, instead of on every read.
+The system will adopt a hierarchical, non-cascading soft-delete model. This approach is chosen to ensure that user-facing delete and restore operations are instantaneous, while centralizing the complexity of hierarchical state within the data-retrieval layer.
 
-**1. Mechanism: Explicit Cascades**
+**1. Mechanism: The Implicit Model**
 
-- **The in_trash Flag:** Deletion state continues to be tracked via the `in_trash` boolean on every block row.
-- **Domain Service–Driven Cascades:** When a block is trashed, the Domain Service loads the full subtree for that block and sets `in_trash = TRUE` on **every** descendant. Restoring a block performs the same cascade in reverse, flipping the flag back to `FALSE` for the entire subtree.
-- **Canonical Structure Preserved:** Cascading writes do **not** mutate `children_ids` or any other structural fields. Ordering and hierarchy remain intact so future restores, moves, or renders operate on the same canonical graph.
+The soft-delete mechanism is defined by the following principles:
 
-**2. Read-Time Simplicity**
+- **The in_trash Flag:** Deletion state is managed by the in_trash boolean flag in the Base Block Schema. A TRUE value indicates the block is considered "in the trash".
+- **Non-Cascading Writes:** When a parent block is moved to the trash, **only that specific block's in_trash flag is set to TRUE**. All of its descendants remain unchanged in the database but are considered *implicitly* trashed by inheritance.
+- **Instantaneous Operations:** This model ensures that both delete and restore operations are single, atomic database updates, making them feel instantaneous to the user regardless of the number of child blocks.
 
-- Because every deleted node is explicitly marked, repository queries only need a simple predicate: `WHERE blocks.in_trash = FALSE`.
-- APIs that need to inspect trashed content (e.g., a Trash view or cascading restore) can opt in via an explicit `include_trashed` flag; the default behavior everywhere else is to exclude trashed rows.
-- Recursive CTEs for visibility checks have been eliminated. Fetching a block tree now executes straightforward lookups that no longer depend on ancestor state.
+**2. Critical Implementation Requirement: Hierarchy-Aware Queries**
 
-**3. Operational Considerations**
+The choice of a non-cascading write model introduces a non-negotiable requirement for all data retrieval logic.
 
-- **Write Amplification:** Deleting a large subtree performs a batched, multi-row update. This is intentional: deletes are rare, while reads happen constantly.
-- **Consistency Guarantees:** Because every node has an explicit flag, there is no such thing as an “implicitly” hidden block. Auditing and migration tooling can reason about trash state with simple SQL filters.
-- **Domain Service Contract:** Business workflows must call the Domain Service (Document Store) for delete/restore so the cascade is enforced. Direct repository access skips this guardrail and is reserved for infrastructure tooling.
+> Every query that fetches blocks for user-facing views MUST be hierarchy-aware.
+> 
+> 
+> To determine if a block is truly visible, a query cannot simply check the block's own in_trash flag. It must traverse up the block's entire parental hierarchy to the root, ensuring that no ancestor is marked as in_trash.
+> 
+> This must be implemented efficiently in a single database roundtrip, typically using a **Recursive Common Table Expression (CTE)**.
+> 
 
-**4. Implementation Checklist**
+This is the foundational integrity constraint for the entire system. Building this logic into the core data access layer from the beginning is essential to prevent deleted content from appearing in any part of the application.
 
-- Document Store implements subtree discovery plus cascaded updates for both delete and restore flows.
-- Block repository read paths filter by `in_trash = FALSE` by default and expose `include_trashed=True` for administrative callers.
-- Future user features (Trash UI, permanent purge, etc.) simply query `WHERE in_trash = TRUE` without needing hierarchy-aware logic.
+**3. Staged Implementation Strategy**
+
+To manage initial complexity while building on a correct technical foundation, the implementation of the deletion feature will be staged.
+
+- **V1 Implementation (Core Mechanism):**
+    - The in_trash column must be added to the blocks table from the initial migration.
+    - All data access methods for reading block trees (e.g., fetching a document's content, search queries) **must** implement the recursive, hierarchy-aware query logic from Day 1.
+- **Future Implementation (User-Facing Features):**
+    - The user interface for a "Trash" view, which would list all blocks where in_trash = TRUE.
+    - The "Restore" functionality, which sets the in_trash flag back to FALSE.
+    - A background job for handling permanent deletion and cleaning up any dangling references that result from it.
 
 ### 12.2. Handling AI-Generated Content
 

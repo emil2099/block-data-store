@@ -37,7 +37,7 @@ def test_get_document_hydrates_tree(document_store, repository, block_factory):
     assert document.children()[0].id == heading_id
 
 
-def test_get_document_rejects_non_document_roots(document_store, repository, block_factory):
+def test_get_root_tree_allows_non_document_roots(document_store, repository, block_factory):
     heading_id = uuid4()
     repository.upsert_blocks(
         [
@@ -50,8 +50,8 @@ def test_get_document_rejects_non_document_roots(document_store, repository, blo
         ]
     )
 
-    with pytest.raises(DocumentStoreError):
-        document_store.get_root_tree(heading_id)
+    result = document_store.get_root_tree(heading_id)
+    assert result.id == heading_id
 
 
 def test_move_block_auto_fills_versions(document_store, repository, block_factory):

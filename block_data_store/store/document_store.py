@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 from uuid import UUID
 
-from block_data_store.models.block import Block, BlockType
+from block_data_store.models.block import Block
 from block_data_store.models.relationship import Relationship
 from block_data_store.repositories.block_repository import BlockRepository
 from block_data_store.repositories.relationship_repository import RelationshipRepository
@@ -43,8 +43,6 @@ class DocumentStore:
     ) -> Block:
         """Return the main block tree anchored at ``root_block_id``."""
         root_block = self._require_block(root_block_id, depth=depth, include_trashed=include_trashed)
-        if root_block.type not in {BlockType.DOCUMENT, BlockType.DATASET}:
-            raise DocumentStoreError(f"Block {root_block_id} is not a supported root type.")
         return root_block
 
     def query_blocks(
